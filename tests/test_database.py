@@ -316,3 +316,99 @@ class TestNewsTable:
         self.db.insert_news(news)  # doublon
         result = self.db.get_news("SAN.PA")
         assert len(result) == 1
+
+
+class TestCatalyseursTable:
+    """Tests pour la table trade_catalyseurs."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+        # Inserer un trade et une news pour les FK
+        self.db.insert_trade_complet({
+            "isin": "FR0000120578", "nom_action": "SANOFI",
+            "date_achat": "2025-07-10", "date_vente": "2025-07-15",
+            "prix_achat": 95.0, "prix_vente": 100.0, "quantite": 10,
+            "rendement_brut_pct": 5.26, "rendement_net_pct": 5.0,
+            "duree_jours": 5, "frais_totaux": 2.5, "statut": "CLOTURE",
+        })
+        self.db.insert_news({
+            "ticker": "SAN.PA", "title": "Sanofi annonce resultats",
+            "source": "Reuters", "url": "https://example.com/sanofi-1",
+            "published_at": "2025-07-09", "description": "Bons resultats",
+            "sentiment": 0.5, "source_api": "gnews",
+        })
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_catalyseur(self):
+        """Insere un catalyseur et le recupere."""
+        catalyseur = {
+            "trade_id": 1, "news_id": 1,
+            "score_pertinence": 0.8, "distance_jours": -1,
+            "match_texte": 1,
+        }
+        self.db.insert_catalyseur(catalyseur)
+        result = self.db.get_catalyseurs(trade_id=1)
+        assert len(result) == 1
+        assert result[0]["score_pertinence"] == 0.8
+        assert result[0]["distance_jours"] == -1
+        assert result[0]["match_texte"] == 1
+
+    def test_insert_catalyseurs_batch(self):
+        """Insere plusieurs catalyseurs en batch."""
+        # Ajouter une 2e news
+        self.db.insert_news({
+            "ticker": "SAN.PA", "title": "Sanofi FDA approval",
+            "source": "Bloomberg", "url": "https://example.com/sanofi-2",
+            "published_at": "2025-07-10", "description": "FDA approves drug",
+            "sentiment": 0.8, "source_api": "alpha_vantage",
+        })
+        catalyseurs = [
+            {"trade_id": 1, "news_id": 1, "score_pertinence": 0.8,
+             "distance_jours": -1, "match_texte": 1},
+            {"trade_id": 1, "news_id": 2, "score_pertinence": 1.0,
+             "distance_jours": 0, "match_texte": 1},
+        ]
+        self.db.insert_catalyseurs_batch(catalyseurs)
+        result = self.db.get_catalyseurs(trade_id=1)
+        assert len(result) == 2
+
+    def test_insert_catalyseur_doublon_ignore(self):
+        """Les doublons (meme trade_id+news_id) sont ignores."""
+        cat = {"trade_id": 1, "news_id": 1, "score_pertinence": 0.8,
+               "distance_jours": -1, "match_texte": 1}
+        self.db.insert_catalyseur(cat)
+        self.db.insert_catalyseur(cat)  # doublon
+        assert self.db.count_catalyseurs() == 1
+
+    def test_count_catalyseurs(self):
+        """Compte le nombre total de catalyseurs."""
+        assert self.db.count_catalyseurs() == 0
+        self.db.insert_catalyseur({
+            "trade_id": 1, "news_id": 1, "score_pertinence": 0.8,
+            "distance_jours": -1, "match_texte": 1,
+        })
+        assert self.db.count_catalyseurs() == 1
+
+    def test_clear_catalyseurs(self):
+        """Vide la table trade_catalyseurs."""
+        self.db.insert_catalyseur({
+            "trade_id": 1, "news_id": 1, "score_pertinence": 0.8,
+            "distance_jours": -1, "match_texte": 1,
+        })
+        self.db.clear_catalyseurs()
+        assert self.db.count_catalyseurs() == 0
+
+    def test_get_news_for_trade_window(self):
+        """Recupere les news dans une fenetre temporelle pour un ticker."""
+        result = self.db.get_news_in_window(
+            ticker="SAN.PA",
+            date_start="2025-07-07",
+            date_end="2025-07-11",
+        )
+        assert len(result) == 1
+        assert result[0]["title"] == "Sanofi annonce resultats"

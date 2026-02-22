@@ -92,6 +92,26 @@ class Database:
         conn.commit()
         # Migration: ajouter les colonnes sentiment et source_api si absentes
         self._migrate_news_columns(conn)
+
+        # Table trade_catalyseurs (etape 3)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS trade_catalyseurs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id INTEGER NOT NULL,
+                news_id INTEGER NOT NULL,
+                score_pertinence REAL NOT NULL,
+                distance_jours INTEGER NOT NULL,
+                match_texte INTEGER DEFAULT 0,
+                UNIQUE(trade_id, news_id),
+                FOREIGN KEY (trade_id) REFERENCES trades_complets(id),
+                FOREIGN KEY (news_id) REFERENCES news(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_catalyseurs_trade
+                ON trade_catalyseurs(trade_id);
+            CREATE INDEX IF NOT EXISTS idx_catalyseurs_news
+                ON trade_catalyseurs(news_id);
+        """)
+
         conn.close()
         logger.info(f"Base de données initialisée: {self.db_path}")
 
@@ -321,3 +341,69 @@ class Database:
         count = conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
         conn.close()
         return count
+
+    # --- Catalyseurs ---
+
+    def insert_catalyseur(self, catalyseur: dict):
+        """Insere un catalyseur. Ignore les doublons (trade_id+news_id)."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT OR IGNORE INTO trade_catalyseurs
+                (trade_id, news_id, score_pertinence, distance_jours, match_texte)
+            VALUES
+                (:trade_id, :news_id, :score_pertinence, :distance_jours, :match_texte)
+        """, catalyseur)
+        conn.commit()
+        conn.close()
+
+    def insert_catalyseurs_batch(self, catalyseurs: list[dict]):
+        """Insere plusieurs catalyseurs en batch. Ignore les doublons."""
+        conn = self._connect()
+        conn.executemany("""
+            INSERT OR IGNORE INTO trade_catalyseurs
+                (trade_id, news_id, score_pertinence, distance_jours, match_texte)
+            VALUES
+                (:trade_id, :news_id, :score_pertinence, :distance_jours, :match_texte)
+        """, catalyseurs)
+        conn.commit()
+        conn.close()
+        logger.info(f"{len(catalyseurs)} catalyseurs inseres en batch")
+
+    def get_catalyseurs(self, trade_id: int) -> list[dict]:
+        """Recupere les catalyseurs pour un trade donne."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM trade_catalyseurs WHERE trade_id = ? ORDER BY distance_jours",
+            (trade_id,),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def count_catalyseurs(self) -> int:
+        """Compte le nombre total de catalyseurs."""
+        conn = self._connect()
+        count = conn.execute(
+            "SELECT COUNT(*) FROM trade_catalyseurs"
+        ).fetchone()[0]
+        conn.close()
+        return count
+
+    def clear_catalyseurs(self):
+        """Vide la table trade_catalyseurs."""
+        conn = self._connect()
+        conn.execute("DELETE FROM trade_catalyseurs")
+        conn.commit()
+        conn.close()
+        logger.info("Table trade_catalyseurs videe")
+
+    def get_news_in_window(self, ticker: str, date_start: str, date_end: str) -> list[dict]:
+        """Recupere les news pour un ticker dans une fenetre de dates."""
+        conn = self._connect()
+        rows = conn.execute("""
+            SELECT * FROM news
+            WHERE ticker = ?
+              AND date(published_at) BETWEEN date(?) AND date(?)
+            ORDER BY published_at
+        """, (ticker, date_start, date_end)).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
