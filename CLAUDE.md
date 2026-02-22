@@ -5,11 +5,17 @@ Bot Python de veille boursiere PEA. Analyse des donnees marche en temps reel, co
 ## Commandes
 
 ```bash
-uv run pytest tests/ -v          # Lancer tous les tests
+uv run pytest tests/ -v          # Lancer tous les tests (69 tests)
 uv run pytest tests/ -v -x       # Stopper au premier echec
 uv run python scripts/init_db.py       # Initialiser la base SQLite
 uv run python scripts/import_pdfs.py   # Importer les PDF dans la base
 uv run python scripts/explore_pdf.py <fichier.pdf>  # Debug: voir le texte brut d'un PDF
+uv run python scripts/collect_historical.py              # Collecter tout (prix + toutes news)
+uv run python scripts/collect_historical.py --prices     # Prix seulement (yfinance)
+uv run python scripts/collect_historical.py --all-news   # Toutes les sources news
+uv run python scripts/collect_historical.py --alphavantage  # Alpha Vantage (sentiment)
+uv run python scripts/collect_historical.py --marketaux  # Marketaux (sentiment)
+uv run python scripts/collect_historical.py --rss        # Flux RSS Google News FR
 ```
 
 ## Architecture
@@ -19,7 +25,7 @@ pea-scanner/
 ├── src/                        # Code source (packages Python)
 │   ├── core/                   # Couche fondation (BDD, logging, config)
 │   ├── extraction/             # Module 1: Extraction PDF -> SQLite
-│   ├── data_collection/        # Module 2: Collecte prix/news (a venir)
+│   ├── data_collection/        # Module 2: Collecte prix/news (4 sources actives)
 │   ├── analysis/               # Module 3: Features + ML (a venir)
 │   ├── model/                  # Module 3: Entrainement + scoring (a venir)
 │   └── alerts/                 # Module 4: Telegram (a venir)
@@ -61,6 +67,8 @@ core (fondation, 0 deps internes)
 | BDD | SQLite (sqlite3 stdlib) |
 | PDF | pdfplumber |
 | Data | pandas, numpy |
+| Prix | yfinance |
+| News | gnews, Alpha Vantage API, Marketaux API, RSS (feedparser) |
 | ML | xgboost, scikit-learn |
 | Indicateurs techniques | ta |
 | Scheduler | APScheduler |
@@ -86,7 +94,7 @@ SQLite dans `data/trades.db`. Tables principales:
 | Etape | Statut | Description |
 |-------|--------|-------------|
 | 1 | DONE | Extraction PDF SG -> SQLite (214 PDF, 166 trades) |
-| 2 | EN COURS | Collecte donnees historiques (prix + news) — design fait, implementation a lancer |
+| 2 | DONE | Collecte donnees historiques — 4 sources, 1357 prix, 1824 news |
 | 3 | TODO | Correlation historique (trades <-> catalyseurs) |
 | 4 | TODO | Feature engineering + entrainement ML |
 | 5 | TODO | Pipeline temps reel + alertes Telegram |
@@ -96,39 +104,38 @@ SQLite dans `data/trades.db`. Tables principales:
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1 DONE, Etape 2 design fait | pdf_parser, trade_matcher, database OK. data_collection/ pas encore code |
-| Config | .env configure | .env avec ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY |
-| Tests | 30/30 PASS | test_database (6), test_pdf_parser (17), test_trade_matcher (7) |
-| Data | Importee | 214 PDF -> 166 trades (141 clotures, 25 ouverts) en SQLite |
-| Docs | Design + plan Etape 2 | docs/plans/2026-02-22-etape2-*.md (design + implementation) |
-| Git | Remote configure | origin sur GitHub |
+| Code | Etape 1+2 DONE | pdf_parser, trade_matcher, database, 4 collectors, ticker_mapper, CLI |
+| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY |
+| Tests | 69/69 PASS | database(12), pdf_parser(17), trade_matcher(7), ticker_mapper(9), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5) |
+| Data | Collectee | 214 exec, 166 trades, 1357 prix, 1824 news (4 sources) |
+| Docs | Design + plan Etape 2 | docs/plans/2026-02-22-etape2-*.md |
+| Git | Pushe sur origin | 16 commits, master a jour |
+
+## Sources de donnees actives
+
+| Source | Fichier | Articles | Sentiment | Cle API |
+|--------|---------|----------|-----------|---------|
+| yfinance | price_collector.py | 1357 prix | - | Non |
+| GNews | news_collector.py | 412 | Non | Non |
+| Alpha Vantage | alpha_vantage_collector.py | 700 | Oui | Oui (.env) |
+| Marketaux | marketaux_collector.py | 43 | Oui | Oui (.env) |
+| RSS Google News FR | rss_collector.py | 669 | Non | Non |
+
+**Tickers sans prix yfinance (probablement delistes):** 2CRSI.PA, ALTBG.PA, AFYREN.PA
 
 ## Next Immediate Action
 
-**Etape 2: Executer le plan d'implementation.** Le design et le plan sont faits.
+**Etape 3: Correlation historique.** Designer puis implementer `catalyst_matcher.py` dans `src/analysis/`.
 
-Lire `docs/plans/2026-02-22-etape2-implementation.md` et executer les 7 taches dans l'ordre:
+Objectif: associer chaque trade a ses catalyseurs (news/events autour de la date d'achat) en croisant les 1824 news avec les 166 trades. C'est la base pour le feature engineering (etape 4).
 
-1. ~~Brainstorming + design~~ FAIT
-2. Ajouter deps yfinance + gnews dans pyproject.toml (`uv sync`)
-3. Ajouter tables prices + news dans database.py (TDD)
-4. Creer ticker_mapper.py avec mapping des 19 actions (TDD)
-5. Creer price_collector.py avec yfinance (TDD)
-6. Creer news_collector.py avec GNews (TDD)
-7. Creer scripts/collect_historical.py
-8. Test d'integration + run complet
+Etapes:
+1. Brainstorming + design du catalyst_matcher
+2. Creer `src/analysis/` avec catalyst_matcher.py (TDD)
+3. Peupler la table `trade_catalyseurs`
+4. Analyser les patterns (quels types de news precedent les trades gagnants)
 
-**Approche:** Subagent-driven development (un agent par tache, review entre chaque).
-
-**API Keys deja configurees dans .env:**
-- ALPHA_VANTAGE_API_KEY (gratuite)
-- MARKETAUX_API_KEY (gratuite)
-
-**Sources de donnees validees:**
-- Prix: yfinance (gratuit, pas de cle)
-- News: GNews Python lib (gratuit, pas de cle) + Alpha Vantage + Marketaux
-- Watchlist 30 valeurs fournie (screenshots dans data/) — pour etape 5 seulement
-- Focus etape 2: donnees HISTORIQUES des 19 actions deja tradees
+**Watchlist 30 valeurs** fournie (screenshots data/) — sera utilisee a l'etape 5 seulement.
 
 ## Donnees cles du trading
 
