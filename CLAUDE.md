@@ -92,6 +92,28 @@ SQLite dans `data/trades.db`. Tables principales:
 | 5 | TODO | Pipeline temps reel + alertes Telegram |
 | 6 | TODO | Tests integration, stabilisation, deploiement VPS |
 
+## Current Project State
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| Code | Etape 1 DONE | pdf_parser, trade_matcher, database — tout fonctionne |
+| Config | Minimal | pyproject.toml, .env.example, pas encore de config.yaml |
+| Tests | 30/30 PASS | test_database (6), test_pdf_parser (17), test_trade_matcher (7) |
+| Data | Importee | 214 PDF -> 166 trades (141 clotures, 25 ouverts) en SQLite |
+| Docs | Complets | CLAUDE.md, .claude/rules/ (4 fichiers), README.md, docs/plans/ |
+| Git | Clean | 6 commits, pas de remote configure |
+
+## Next Immediate Action
+
+**Etape 2: Collecte de donnees marche + news.** Pour demarrer:
+
+1. Demander a l'utilisateur sa watchlist de 30 tickers (format Yahoo: MC.PA, BN.PA, etc.)
+2. Creer `config/config.yaml` et `config/tickers_watchlist.yaml`
+3. Implementer `src/data_collection/price_collector.py` avec yfinance
+4. L'utilisateur doit creer des comptes API (Alpha Vantage, Finnhub, etc.) au besoin
+
+Utiliser le skill `superpowers:brainstorming` avant de commencer l'etape 2 pour valider l'approche.
+
 ## Donnees cles du trading
 
 - **Style**: Swing court terme (quelques jours), objectif 4-5% par trade
