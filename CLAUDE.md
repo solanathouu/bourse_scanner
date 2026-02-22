@@ -86,7 +86,7 @@ SQLite dans `data/trades.db`. Tables principales:
 | Etape | Statut | Description |
 |-------|--------|-------------|
 | 1 | DONE | Extraction PDF SG -> SQLite (214 PDF, 166 trades) |
-| 2 | TODO | Collecte donnees marche + news |
+| 2 | EN COURS | Collecte donnees historiques (prix + news) — design fait, implementation a lancer |
 | 3 | TODO | Correlation historique (trades <-> catalyseurs) |
 | 4 | TODO | Feature engineering + entrainement ML |
 | 5 | TODO | Pipeline temps reel + alertes Telegram |
@@ -96,23 +96,39 @@ SQLite dans `data/trades.db`. Tables principales:
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1 DONE | pdf_parser, trade_matcher, database — tout fonctionne |
-| Config | Minimal | pyproject.toml, .env.example, pas encore de config.yaml |
+| Code | Etape 1 DONE, Etape 2 design fait | pdf_parser, trade_matcher, database OK. data_collection/ pas encore code |
+| Config | .env configure | .env avec ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY |
 | Tests | 30/30 PASS | test_database (6), test_pdf_parser (17), test_trade_matcher (7) |
 | Data | Importee | 214 PDF -> 166 trades (141 clotures, 25 ouverts) en SQLite |
-| Docs | Complets | CLAUDE.md, .claude/rules/ (4 fichiers), README.md, docs/plans/ |
-| Git | Clean | 6 commits, pas de remote configure |
+| Docs | Design + plan Etape 2 | docs/plans/2026-02-22-etape2-*.md (design + implementation) |
+| Git | Remote configure | origin sur GitHub |
 
 ## Next Immediate Action
 
-**Etape 2: Collecte de donnees marche + news.** Pour demarrer:
+**Etape 2: Executer le plan d'implementation.** Le design et le plan sont faits.
 
-1. Demander a l'utilisateur sa watchlist de 30 tickers (format Yahoo: MC.PA, BN.PA, etc.)
-2. Creer `config/config.yaml` et `config/tickers_watchlist.yaml`
-3. Implementer `src/data_collection/price_collector.py` avec yfinance
-4. L'utilisateur doit creer des comptes API (Alpha Vantage, Finnhub, etc.) au besoin
+Lire `docs/plans/2026-02-22-etape2-implementation.md` et executer les 7 taches dans l'ordre:
 
-Utiliser le skill `superpowers:brainstorming` avant de commencer l'etape 2 pour valider l'approche.
+1. ~~Brainstorming + design~~ FAIT
+2. Ajouter deps yfinance + gnews dans pyproject.toml (`uv sync`)
+3. Ajouter tables prices + news dans database.py (TDD)
+4. Creer ticker_mapper.py avec mapping des 19 actions (TDD)
+5. Creer price_collector.py avec yfinance (TDD)
+6. Creer news_collector.py avec GNews (TDD)
+7. Creer scripts/collect_historical.py
+8. Test d'integration + run complet
+
+**Approche:** Subagent-driven development (un agent par tache, review entre chaque).
+
+**API Keys deja configurees dans .env:**
+- ALPHA_VANTAGE_API_KEY (gratuite)
+- MARKETAUX_API_KEY (gratuite)
+
+**Sources de donnees validees:**
+- Prix: yfinance (gratuit, pas de cle)
+- News: GNews Python lib (gratuit, pas de cle) + Alpha Vantage + Marketaux
+- Watchlist 30 valeurs fournie (screenshots dans data/) — pour etape 5 seulement
+- Focus etape 2: donnees HISTORIQUES des 19 actions deja tradees
 
 ## Donnees cles du trading
 
