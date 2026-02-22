@@ -10,6 +10,8 @@ dependencies = [
     "pdfplumber>=0.11.9",
     "python-dotenv>=1.2.1",
     "pyyaml>=6.0.3",
+    "yfinance>=0.2.50",
+    "gnews>=0.4.3",
 ]
 
 [dependency-groups]
