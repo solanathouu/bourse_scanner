@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 
+import pandas as pd
 import yfinance as yf
 from loguru import logger
 
@@ -30,6 +31,10 @@ class PriceCollector:
         if df.empty:
             logger.warning(f"Aucun prix retourne pour {ticker}")
             return 0
+
+        # yfinance 1.x retourne un MultiIndex (Price, Ticker) pour un seul ticker
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
         prices = []
         for date, row in df.iterrows():
