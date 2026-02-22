@@ -90,8 +90,21 @@ class Database:
                 ON news(ticker);
         """)
         conn.commit()
+        # Migration: ajouter les colonnes sentiment et source_api si absentes
+        self._migrate_news_columns(conn)
         conn.close()
         logger.info(f"Base de données initialisée: {self.db_path}")
+
+    def _migrate_news_columns(self, conn: sqlite3.Connection):
+        """Ajoute les colonnes sentiment et source_api a la table news si absentes."""
+        existing = [row[1] for row in conn.execute("PRAGMA table_info(news)").fetchall()]
+        if "sentiment" not in existing:
+            conn.execute("ALTER TABLE news ADD COLUMN sentiment REAL")
+            logger.info("Migration: colonne 'sentiment' ajoutee a la table news")
+        if "source_api" not in existing:
+            conn.execute("ALTER TABLE news ADD COLUMN source_api TEXT DEFAULT 'gnews'")
+            logger.info("Migration: colonne 'source_api' ajoutee a la table news")
+        conn.commit()
 
     def insert_execution(self, execution: dict):
         """Insère une exécution (un PDF parsé) dans la base."""
@@ -261,22 +274,33 @@ class Database:
         conn = self._connect()
         conn.execute("""
             INSERT OR IGNORE INTO news
-                (ticker, title, source, url, published_at, description)
+                (ticker, title, source, url, published_at, description,
+                 sentiment, source_api)
             VALUES
-                (:ticker, :title, :source, :url, :published_at, :description)
-        """, news)
+                (:ticker, :title, :source, :url, :published_at, :description,
+                 :sentiment, :source_api)
+        """, {
+            "sentiment": None, "source_api": "gnews",
+            **news,
+        })
         conn.commit()
         conn.close()
 
     def insert_news_batch(self, news_list: list[dict]):
         """Insere plusieurs news en batch. Ignore les doublons."""
+        enriched = [
+            {"sentiment": None, "source_api": "gnews", **n}
+            for n in news_list
+        ]
         conn = self._connect()
         conn.executemany("""
             INSERT OR IGNORE INTO news
-                (ticker, title, source, url, published_at, description)
+                (ticker, title, source, url, published_at, description,
+                 sentiment, source_api)
             VALUES
-                (:ticker, :title, :source, :url, :published_at, :description)
-        """, news_list)
+                (:ticker, :title, :source, :url, :published_at, :description,
+                 :sentiment, :source_api)
+        """, enriched)
         conn.commit()
         conn.close()
         logger.info(f"{len(news_list)} news inserees en batch")
