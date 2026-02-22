@@ -5,7 +5,7 @@ Bot Python de veille boursiere PEA. Analyse des donnees marche en temps reel, co
 ## Commandes
 
 ```bash
-uv run pytest tests/ -v          # Lancer tous les tests (69 tests)
+uv run pytest tests/ -v          # Lancer tous les tests (97 tests)
 uv run pytest tests/ -v -x       # Stopper au premier echec
 uv run python scripts/init_db.py       # Initialiser la base SQLite
 uv run python scripts/import_pdfs.py   # Importer les PDF dans la base
@@ -16,6 +16,8 @@ uv run python scripts/collect_historical.py --all-news   # Toutes les sources ne
 uv run python scripts/collect_historical.py --alphavantage  # Alpha Vantage (sentiment)
 uv run python scripts/collect_historical.py --marketaux  # Marketaux (sentiment)
 uv run python scripts/collect_historical.py --rss        # Flux RSS Google News FR
+uv run python scripts/match_catalysts.py           # Matcher trades <-> catalyseurs
+uv run python scripts/match_catalysts.py --stats    # Stats catalyseurs seulement
 ```
 
 ## Architecture
@@ -95,7 +97,7 @@ SQLite dans `data/trades.db`. Tables principales:
 |-------|--------|-------------|
 | 1 | DONE | Extraction PDF SG -> SQLite (214 PDF, 166 trades) |
 | 2 | DONE | Collecte donnees historiques — 4 sources, 1357 prix, 1824 news |
-| 3 | TODO | Correlation historique (trades <-> catalyseurs) |
+| 3 | DONE | Correlation historique — catalyst_matcher, 649 associations, 113/166 trades |
 | 4 | TODO | Feature engineering + entrainement ML |
 | 5 | TODO | Pipeline temps reel + alertes Telegram |
 | 6 | TODO | Tests integration, stabilisation, deploiement VPS |
@@ -104,12 +106,12 @@ SQLite dans `data/trades.db`. Tables principales:
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1+2 DONE | pdf_parser, trade_matcher, database, 4 collectors, ticker_mapper, CLI |
+| Code | Etape 1+2+3 DONE | pdf_parser, trade_matcher, database, 4 collectors, ticker_mapper, catalyst_matcher, CLI |
 | Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY |
-| Tests | 69/69 PASS | database(12), pdf_parser(17), trade_matcher(7), ticker_mapper(9), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5) |
-| Data | Collectee | 214 exec, 166 trades, 1357 prix, 1824 news (4 sources) |
-| Docs | Design + plan Etape 2 | docs/plans/2026-02-22-etape2-*.md |
-| Git | Pushe sur origin | 16 commits, master a jour |
+| Tests | 97/97 PASS | database(18), pdf_parser(17), trade_matcher(7), ticker_mapper(9), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22) |
+| Data | Collectee + correlee | 214 exec, 166 trades, 1357 prix, 1824 news, 649 catalyseurs |
+| Docs | Design + plans Etapes 2-3 | docs/plans/2026-02-22-etape*-*.md |
+| Git | Pushe sur origin | 19 commits, master a jour |
 
 ## Sources de donnees actives
 
@@ -125,15 +127,15 @@ SQLite dans `data/trades.db`. Tables principales:
 
 ## Next Immediate Action
 
-**Etape 3: Correlation historique.** Designer puis implementer `catalyst_matcher.py` dans `src/analysis/`.
+**Etape 4: Feature engineering + entrainement ML.** Creer le pipeline de features et entrainer un modele XGBoost.
 
-Objectif: associer chaque trade a ses catalyseurs (news/events autour de la date d'achat) en croisant les 1824 news avec les 166 trades. C'est la base pour le feature engineering (etape 4).
+Objectif: transformer les donnees brutes (prix, news, catalyseurs) en features pour un modele predictif.
 
-Etapes:
-1. Brainstorming + design du catalyst_matcher
-2. Creer `src/analysis/` avec catalyst_matcher.py (TDD)
-3. Peupler la table `trade_catalyseurs`
-4. Analyser les patterns (quels types de news precedent les trades gagnants)
+Donnees disponibles pour le ML:
+- 166 trades (89% win rate, 141 clotures)
+- 649 associations trade-catalyseur (score moyen 0.84)
+- 1357 prix OHLCV, 1824 news avec sentiment partiel
+- Sources: gnews (401 assoc), alpha_vantage (100), RSS (103), marketaux (25)
 
 **Watchlist 30 valeurs** fournie (screenshots data/) — sera utilisee a l'etape 5 seulement.
 
