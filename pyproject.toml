@@ -1,0 +1,22 @@
+[project]
+name = "pea-scanner"
+version = "0.1.0"
+description = "Bot de veille boursiere PEA - analyse technique, ML et alertes Telegram"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "loguru>=0.7.3",
+    "pandas>=3.0.1",
+    "pdfplumber>=0.11.9",
+    "python-dotenv>=1.2.1",
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
