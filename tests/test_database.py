@@ -4,6 +4,8 @@ import sqlite3
 import os
 import tempfile
 
+import pytest
+
 from src.core.database import Database
 
 
@@ -212,3 +214,105 @@ def test_database_get_distinct_isins():
         assert len(isins) == 2
         assert "FR0000121014" in isins
         assert "FR0000131104" in isins
+
+
+class TestPricesTable:
+    """Tests pour la table prices."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_price(self):
+        """Insere un prix et le recupere."""
+        price = {
+            "ticker": "SAN.PA",
+            "date": "2025-06-15",
+            "open": 95.50,
+            "high": 96.80,
+            "low": 95.10,
+            "close": 96.20,
+            "volume": 1234567,
+        }
+        self.db.insert_price(price)
+        prices = self.db.get_prices("SAN.PA")
+        assert len(prices) == 1
+        assert prices[0]["close"] == 96.20
+
+    def test_insert_prices_batch(self):
+        """Insere plusieurs prix en batch."""
+        prices = [
+            {"ticker": "SAN.PA", "date": "2025-06-15", "open": 95.5,
+             "high": 96.8, "low": 95.1, "close": 96.2, "volume": 100},
+            {"ticker": "SAN.PA", "date": "2025-06-16", "open": 96.2,
+             "high": 97.0, "low": 95.8, "close": 96.5, "volume": 200},
+        ]
+        self.db.insert_prices_batch(prices)
+        result = self.db.get_prices("SAN.PA")
+        assert len(result) == 2
+
+    def test_insert_price_doublon_ignore(self):
+        """Un doublon (meme ticker+date) est ignore silencieusement."""
+        price = {"ticker": "SAN.PA", "date": "2025-06-15", "open": 95.5,
+                 "high": 96.8, "low": 95.1, "close": 96.2, "volume": 100}
+        self.db.insert_price(price)
+        self.db.insert_price(price)  # doublon
+        prices = self.db.get_prices("SAN.PA")
+        assert len(prices) == 1
+
+
+class TestNewsTable:
+    """Tests pour la table news."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_news(self):
+        """Insere une news et la recupere."""
+        news = {
+            "ticker": "SAN.PA",
+            "title": "Sanofi: resultats T2 au-dessus des attentes",
+            "source": "BFM Bourse",
+            "url": "https://example.com/sanofi-t2",
+            "published_at": "2025-06-15 08:30:00",
+            "description": "Le laboratoire publie des resultats...",
+        }
+        self.db.insert_news(news)
+        result = self.db.get_news("SAN.PA")
+        assert len(result) == 1
+        assert result[0]["title"] == "Sanofi: resultats T2 au-dessus des attentes"
+
+    def test_insert_news_batch(self):
+        """Insere plusieurs news en batch."""
+        news_list = [
+            {"ticker": "SAN.PA", "title": "News 1", "source": "BFM",
+             "url": "https://example.com/1", "published_at": "2025-06-15 08:30:00",
+             "description": "Desc 1"},
+            {"ticker": "SAN.PA", "title": "News 2", "source": "Les Echos",
+             "url": "https://example.com/2", "published_at": "2025-06-16 09:00:00",
+             "description": "Desc 2"},
+        ]
+        self.db.insert_news_batch(news_list)
+        result = self.db.get_news("SAN.PA")
+        assert len(result) == 2
+
+    def test_insert_news_doublon_url_ignore(self):
+        """Un doublon (meme URL) est ignore silencieusement."""
+        news = {"ticker": "SAN.PA", "title": "News 1", "source": "BFM",
+                "url": "https://example.com/1", "published_at": "2025-06-15 08:30:00",
+                "description": "Desc 1"}
+        self.db.insert_news(news)
+        self.db.insert_news(news)  # doublon
+        result = self.db.get_news("SAN.PA")
+        assert len(result) == 1

@@ -56,12 +56,38 @@ class Database:
                 statut TEXT DEFAULT 'OUVERT' CHECK (statut IN ('OUVERT', 'CLOTURE'))
             );
 
+            CREATE TABLE IF NOT EXISTS prices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume INTEGER,
+                UNIQUE(ticker, date)
+            );
+
+            CREATE TABLE IF NOT EXISTS news (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                title TEXT NOT NULL,
+                source TEXT,
+                url TEXT UNIQUE,
+                published_at TEXT,
+                description TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_executions_date
                 ON executions(date_execution);
             CREATE INDEX IF NOT EXISTS idx_executions_isin
                 ON executions(isin);
             CREATE INDEX IF NOT EXISTS idx_trades_isin
                 ON trades_complets(isin);
+            CREATE INDEX IF NOT EXISTS idx_prices_ticker_date
+                ON prices(ticker, date);
+            CREATE INDEX IF NOT EXISTS idx_news_ticker
+                ON news(ticker);
         """)
         conn.commit()
         conn.close()
@@ -181,5 +207,93 @@ class Database:
         """Compte le nombre total de trades complets."""
         conn = self._connect()
         count = conn.execute("SELECT COUNT(*) FROM trades_complets").fetchone()[0]
+        conn.close()
+        return count
+
+    # --- Prices ---
+
+    def insert_price(self, price: dict):
+        """Insere un prix OHLCV. Ignore les doublons (ticker+date)."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT OR IGNORE INTO prices
+                (ticker, date, open, high, low, close, volume)
+            VALUES
+                (:ticker, :date, :open, :high, :low, :close, :volume)
+        """, price)
+        conn.commit()
+        conn.close()
+
+    def insert_prices_batch(self, prices: list[dict]):
+        """Insere plusieurs prix en batch. Ignore les doublons."""
+        conn = self._connect()
+        conn.executemany("""
+            INSERT OR IGNORE INTO prices
+                (ticker, date, open, high, low, close, volume)
+            VALUES
+                (:ticker, :date, :open, :high, :low, :close, :volume)
+        """, prices)
+        conn.commit()
+        conn.close()
+        logger.info(f"{len(prices)} prix inseres en batch")
+
+    def get_prices(self, ticker: str) -> list[dict]:
+        """Recupere les prix pour un ticker, tries par date."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM prices WHERE ticker = ? ORDER BY date",
+            (ticker,),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def count_prices(self) -> int:
+        """Compte le nombre total de prix."""
+        conn = self._connect()
+        count = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
+        conn.close()
+        return count
+
+    # --- News ---
+
+    def insert_news(self, news: dict):
+        """Insere une news. Ignore les doublons (meme URL)."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT OR IGNORE INTO news
+                (ticker, title, source, url, published_at, description)
+            VALUES
+                (:ticker, :title, :source, :url, :published_at, :description)
+        """, news)
+        conn.commit()
+        conn.close()
+
+    def insert_news_batch(self, news_list: list[dict]):
+        """Insere plusieurs news en batch. Ignore les doublons."""
+        conn = self._connect()
+        conn.executemany("""
+            INSERT OR IGNORE INTO news
+                (ticker, title, source, url, published_at, description)
+            VALUES
+                (:ticker, :title, :source, :url, :published_at, :description)
+        """, news_list)
+        conn.commit()
+        conn.close()
+        logger.info(f"{len(news_list)} news inserees en batch")
+
+    def get_news(self, ticker: str) -> list[dict]:
+        """Recupere les news pour un ticker, triees par date."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM news WHERE ticker = ? ORDER BY published_at",
+            (ticker,),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def count_news(self) -> int:
+        """Compte le nombre total de news."""
+        conn = self._connect()
+        count = conn.execute("SELECT COUNT(*) FROM news").fetchone()[0]
         conn.close()
         return count
