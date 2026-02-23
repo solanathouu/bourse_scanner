@@ -125,13 +125,58 @@ SQLite dans `data/trades.db`. Tables principales:
 
 **Tickers sans prix yfinance (probablement delistes):** 2CRSI.PA, ALTBG.PA, AFYREN.PA
 
+## PHILOSOPHIE FONDAMENTALE DU PROJET
+
+**LE BOT DOIT TRADER COMME NICOLAS TRADE.** C'est le coeur absolu du projet.
+
+Le but n'est PAS de creer un bot generique qui agregue des donnees internet et les recrache.
+Le but EST de creer un algorithme d'intelligence qui COMPREND le style de trading personnel
+de Nicolas en analysant ses 166 trades historiques, et qui REPRODUIT sa logique de decision.
+
+### Ce que ca veut dire concretement
+
+Pour CHAQUE trade historique, l'algorithme doit:
+1. **Comprendre POURQUOI Nicolas a achete** — Quel catalyseur l'a pousse a entrer en position?
+   (annonce de bilan, upgrade analyste, news positive, rebond technique, volume anormal...)
+2. **Comprendre POURQUOI Nicolas a vendu** — Objectif atteint? Stop loss? Changement de contexte?
+3. **Extraire les PATTERNS RECURRENTS** — Quels types de catalyseurs declenchent les meilleurs trades?
+   Quelles conditions techniques accompagnent ses entrees gagnantes?
+4. **Construire un profil de trading** — "Nicolas achete quand [conditions], il vend quand [conditions]"
+
+### L'etape 4 est LA CLE de tout le projet
+
+L'etape 4 (Feature Engineering + ML) doit:
+- Matcher FINEMENT chaque trade avec les news/events de l'epoque (pas un simple score temporel)
+- Classifier les catalyseurs par type (EARNINGS, UPGRADE, FDA_APPROVAL, CONTRAT, etc.)
+- Apprendre les patterns: "quand il y a une annonce de bilan + RSI < 40 -> Nicolas achete et gagne X%"
+- Le modele ML doit etre entraine sur les DECISIONS de Nicolas, pas sur des regles generiques
+- Le score de confiance final doit refleter "est-ce que Nicolas prendrait ce trade?"
+
+### Anti-patterns a eviter absolument
+
+- NE PAS faire un bot generique "RSI < 30 = acheter"
+- NE PAS scorer les news avec un simple matching temporel sans comprendre le CONTENU
+- NE PAS ignorer le contexte technique au moment de l'achat
+- NE PAS traiter tous les trades de la meme facon (un trade sur annonce de bilan ≠ un trade technique)
+- NE PAS oublier que c'est la COMBINAISON catalyseur + conditions techniques qui fait le trade
+
 ## Next Immediate Action
 
-**Etape 4: Feature engineering + entrainement ML.** Creer le pipeline de features et entrainer un modele XGBoost.
+**Etape 4: Feature engineering + entrainement ML.** L'ETAPE LA PLUS IMPORTANTE du projet.
 
-Objectif: transformer les donnees brutes (prix, news, catalyseurs) en features pour un modele predictif.
+Objectif: comprendre POURQUOI Nicolas prend chaque trade, extraire ses patterns de decision,
+et entrainer un modele qui reproduit sa logique personnelle.
 
-Donnees disponibles pour le ML:
+Sous-etapes:
+1. **Analyse approfondie des catalyseurs** — Classifier les 649 associations par type de catalyseur,
+   analyser le contenu des news (pas juste la proximite temporelle)
+2. **Profil technique a l'entree** — Pour chaque trade, capturer l'etat technique complet
+   (RSI, MACD, volume, position vs SMA, etc.) au moment exact de l'achat
+3. **Feature engineering** — Combiner catalyseur + etat technique + contexte marche
+4. **Entrainement ML** — XGBoost entraine sur les decisions de Nicolas
+5. **Validation** — Walk-forward, comparaison avec baseline naif
+
+Donnees disponibles:
 - 166 trades (89% win rate, 141 clotures)
 - 649 associations trade-catalyseur (score moyen 0.84)
 - 1357 prix OHLCV, 1824 news avec sentiment partiel
@@ -146,3 +191,5 @@ Donnees disponibles pour le ML:
 - **Watchlist**: 30 valeurs (liste fournie par l'utilisateur)
 - **Performance historique**: 89% win rate, +9.21% rendement moyen, 20.7j duree moyenne
 - **19 actions tradees** sur ~10 mois (mai 2025 - fev 2026)
+- **IMPORTANT**: Nicolas ne prend pas des trades au hasard. Chaque achat est motive par un
+  catalyseur specifique (news, annonce, signal technique). Le modele doit apprendre CES motivations.
