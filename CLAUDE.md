@@ -5,7 +5,7 @@ Bot Python de veille boursiere PEA. Analyse des donnees marche en temps reel, co
 ## Commandes
 
 ```bash
-uv run pytest tests/ -v          # Lancer tous les tests (97 tests)
+uv run pytest tests/ -v          # Lancer tous les tests (167 tests)
 uv run pytest tests/ -v -x       # Stopper au premier echec
 uv run python scripts/init_db.py       # Initialiser la base SQLite
 uv run python scripts/import_pdfs.py   # Importer les PDF dans la base
@@ -18,6 +18,10 @@ uv run python scripts/collect_historical.py --marketaux  # Marketaux (sentiment)
 uv run python scripts/collect_historical.py --rss        # Flux RSS Google News FR
 uv run python scripts/match_catalysts.py           # Matcher trades <-> catalyseurs
 uv run python scripts/match_catalysts.py --stats    # Stats catalyseurs seulement
+uv run python scripts/train_model.py               # Entrainer le modele + evaluer
+uv run python scripts/train_model.py --features     # Explorer les features
+uv run python scripts/analyze_features.py           # Stats gagnants vs perdants
+uv run python scripts/analyze_features.py --trade 42  # Features d'un trade specifique
 ```
 
 ## Architecture
@@ -28,9 +32,9 @@ pea-scanner/
 │   ├── core/                   # Couche fondation (BDD, logging, config)
 │   ├── extraction/             # Module 1: Extraction PDF -> SQLite
 │   ├── data_collection/        # Module 2: Collecte prix/news (4 sources actives)
-│   ├── analysis/               # Module 3: Features + ML (a venir)
-│   ├── model/                  # Module 3: Entrainement + scoring (a venir)
-│   └── alerts/                 # Module 4: Telegram (a venir)
+│   ├── analysis/               # Module 3: NewsClassifier, TechnicalIndicators, FeatureEngine, CatalystMatcher
+│   ├── model/                  # Module 4: Trainer (XGBoost), Evaluator
+│   └── alerts/                 # Module 5: Telegram (a venir)
 ├── scripts/                    # Points d'entree CLI
 ├── tests/                      # Tests (miroir de src/)
 ├── config/                     # Fichiers de configuration YAML
@@ -72,7 +76,7 @@ core (fondation, 0 deps internes)
 | Prix | yfinance |
 | News | gnews, Alpha Vantage API, Marketaux API, RSS (feedparser) |
 | ML | xgboost, scikit-learn |
-| Indicateurs techniques | ta |
+| Indicateurs techniques | ta (RSI, MACD, Bollinger, ATR) |
 | Scheduler | APScheduler |
 | Telegram | python-telegram-bot |
 | Logging | loguru |
@@ -98,7 +102,7 @@ SQLite dans `data/trades.db`. Tables principales:
 | 1 | DONE | Extraction PDF SG -> SQLite (214 PDF, 166 trades) |
 | 2 | DONE | Collecte donnees historiques — 4 sources, 1357 prix, 1824 news |
 | 3 | DONE | Correlation historique — catalyst_matcher, 649 associations, 113/166 trades |
-| 4 | TODO | Feature engineering + entrainement ML |
+| 4 | DONE | Feature engineering + ML — NewsClassifier, TechnicalIndicators, FeatureEngine, XGBoost Trainer, Evaluator |
 | 5 | TODO | Pipeline temps reel + alertes Telegram |
 | 6 | TODO | Tests integration, stabilisation, deploiement VPS |
 
@@ -106,11 +110,11 @@ SQLite dans `data/trades.db`. Tables principales:
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1+2+3 DONE | pdf_parser, trade_matcher, database, 4 collectors, ticker_mapper, catalyst_matcher, CLI |
+| Code | Etape 1+2+3+4 DONE | pdf_parser, trade_matcher, database, 4 collectors, ticker_mapper, catalyst_matcher, news_classifier, technical_indicators, feature_engine, trainer, evaluator, CLI |
 | Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY |
-| Tests | 97/97 PASS | database(18), pdf_parser(17), trade_matcher(7), ticker_mapper(9), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22) |
+| Tests | 167/167 PASS | database(18), pdf_parser(17), trade_matcher(7), ticker_mapper(9), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(13), trainer(10), evaluator(6) |
 | Data | Collectee + correlee | 214 exec, 166 trades, 1357 prix, 1824 news, 649 catalyseurs |
-| Docs | Design + plans Etapes 2-3 | docs/plans/2026-02-22-etape*-*.md |
+| Docs | Design + plans Etapes 2-4 | docs/plans/2026-02-22-etape*-*.md, 2026-02-23-etape4-*.md |
 | Git | Pushe sur origin | 19 commits, master a jour |
 
 ## Sources de donnees actives
@@ -162,27 +166,20 @@ L'etape 4 (Feature Engineering + ML) doit:
 
 ## Next Immediate Action
 
-**Etape 4: Feature engineering + entrainement ML.** L'ETAPE LA PLUS IMPORTANTE du projet.
+**Etape 5: Pipeline temps reel + alertes Telegram.**
 
-Objectif: comprendre POURQUOI Nicolas prend chaque trade, extraire ses patterns de decision,
-et entrainer un modele qui reproduit sa logique personnelle.
+Objectif: deployer le modele entraine pour scanner en temps reel la watchlist
+de 30 valeurs, calculer un score "Nicolas prendrait ce trade?", et envoyer
+des alertes Telegram quand le score depasse le seuil.
 
 Sous-etapes:
-1. **Analyse approfondie des catalyseurs** — Classifier les 649 associations par type de catalyseur,
-   analyser le contenu des news (pas juste la proximite temporelle)
-2. **Profil technique a l'entree** — Pour chaque trade, capturer l'etat technique complet
-   (RSI, MACD, volume, position vs SMA, etc.) au moment exact de l'achat
-3. **Feature engineering** — Combiner catalyseur + etat technique + contexte marche
-4. **Entrainement ML** — XGBoost entraine sur les decisions de Nicolas
-5. **Validation** — Walk-forward, comparaison avec baseline naif
+1. **Predictor temps reel** — Charger le modele, calculer les features en direct
+2. **Signal filter** — Logique de filtrage intelligent (seuil, cooldown, dedup)
+3. **Telegram bot** — Envoi des alertes formatees
+4. **Scheduler** — APScheduler pour la boucle de collecte + scoring
+5. **Configuration** — Watchlist 30 valeurs, seuils, intervalles
 
-Donnees disponibles:
-- 166 trades (89% win rate, 141 clotures)
-- 649 associations trade-catalyseur (score moyen 0.84)
-- 1357 prix OHLCV, 1824 news avec sentiment partiel
-- Sources: gnews (401 assoc), alpha_vantage (100), RSS (103), marketaux (25)
-
-**Watchlist 30 valeurs** fournie (screenshots data/) — sera utilisee a l'etape 5 seulement.
+**Watchlist 30 valeurs** fournie (screenshots data/).
 
 ## Donnees cles du trading
 
