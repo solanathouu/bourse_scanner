@@ -25,7 +25,7 @@ TECHNICAL_FEATURES = [
 # Colonnes de features catalyseur (LLM-based)
 CATALYST_FEATURES = [
     "catalyst_type", "catalyst_confidence", "news_sentiment",
-    "trade_quality_score", "has_clear_catalyst", "buy_reason_length",
+    "has_clear_catalyst", "buy_reason_length",
 ]
 
 # Colonnes de features contexte
@@ -76,13 +76,10 @@ class FeatureEngine:
         analysis = self.db.get_trade_analysis(trade_id)
 
         if analysis:
-            quality_map = {"EXCELLENT": 4, "BON": 3, "MOYEN": 2, "MAUVAIS": 1}
             return {
                 "catalyst_type": analysis["catalyst_type"],
                 "catalyst_confidence": analysis["catalyst_confidence"],
                 "news_sentiment": analysis["news_sentiment"] or 0.0,
-                "trade_quality_score": quality_map.get(
-                    analysis["trade_quality"], 2),
                 "has_clear_catalyst": 1 if analysis["primary_news_id"] else 0,
                 "buy_reason_length": len(analysis["buy_reason"] or ""),
             }
@@ -92,7 +89,6 @@ class FeatureEngine:
             "catalyst_type": "TECHNICAL",
             "catalyst_confidence": 0.0,
             "news_sentiment": 0.0,
-            "trade_quality_score": 2,
             "has_clear_catalyst": 0,
             "buy_reason_length": 0,
         }

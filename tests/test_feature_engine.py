@@ -125,7 +125,6 @@ class TestBuildTradeFeatures:
         assert "catalyst_type" in result
         assert "catalyst_confidence" in result
         assert "news_sentiment" in result
-        assert "trade_quality_score" in result
         assert "has_clear_catalyst" in result
 
     def test_build_has_context_features(self):
@@ -153,7 +152,6 @@ class TestBuildTradeFeatures:
         assert result["catalyst_type"] == "EARNINGS"
         assert result["catalyst_confidence"] == 0.85
         assert result["has_clear_catalyst"] == 1
-        assert result["trade_quality_score"] == 3  # BON = 3
 
     def test_trade_without_llm_falls_back(self):
         """Un trade sans analyse LLM utilise le fallback TECHNICAL."""
