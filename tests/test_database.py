@@ -412,3 +412,97 @@ class TestCatalyseursTable:
         )
         assert len(result) == 1
         assert result[0]["title"] == "Sanofi annonce resultats"
+
+
+class TestTradeAnalysesLLM:
+    """Tests CRUD pour la table trade_analyses_llm."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+        # Insert a trade to reference
+        self.db.insert_trade_complet({
+            "isin": "FR0000120578", "nom_action": "SANOFI",
+            "date_achat": "2025-07-10", "date_vente": "2025-07-20",
+            "prix_achat": 95.0, "prix_vente": 100.0, "quantite": 10,
+            "rendement_brut_pct": 5.26, "rendement_net_pct": 5.0,
+            "duree_jours": 10, "frais_totaux": 2.5, "statut": "CLOTURE",
+        })
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_and_get_analysis(self):
+        """Insert et recupere une analyse LLM."""
+        analysis = {
+            "trade_id": 1,
+            "primary_news_id": None,
+            "catalyst_type": "EARNINGS",
+            "catalyst_summary": "Nicolas a achete car resultats T2 solides",
+            "catalyst_confidence": 0.85,
+            "news_sentiment": 0.6,
+            "buy_reason": "Resultats T2 au-dessus des attentes",
+            "sell_reason": "Objectif de +5% atteint",
+            "trade_quality": "BON",
+            "model_used": "gpt-4o-mini",
+            "analyzed_at": "2026-02-24 19:00:00",
+        }
+        self.db.insert_trade_analysis(analysis)
+        result = self.db.get_trade_analysis(1)
+        assert result is not None
+        assert result["catalyst_type"] == "EARNINGS"
+        assert result["catalyst_confidence"] == 0.85
+        assert result["buy_reason"] == "Resultats T2 au-dessus des attentes"
+
+    def test_get_analysis_missing(self):
+        """Retourne None si le trade n'a pas d'analyse."""
+        result = self.db.get_trade_analysis(999)
+        assert result is None
+
+    def test_upsert_analysis(self):
+        """Insert ou replace une analyse existante."""
+        analysis1 = {
+            "trade_id": 1, "primary_news_id": None,
+            "catalyst_type": "UNKNOWN", "catalyst_summary": "test",
+            "catalyst_confidence": 0.5, "news_sentiment": 0.0,
+            "buy_reason": "v1", "sell_reason": "v1",
+            "trade_quality": "MOYEN", "model_used": "gpt-4o-mini",
+            "analyzed_at": "2026-02-24 19:00:00",
+        }
+        self.db.insert_trade_analysis(analysis1)
+        # Update with new data
+        analysis2 = {**analysis1, "catalyst_type": "EARNINGS",
+                      "catalyst_confidence": 0.9, "buy_reason": "v2"}
+        self.db.insert_trade_analysis(analysis2)
+        result = self.db.get_trade_analysis(1)
+        assert result["catalyst_type"] == "EARNINGS"
+        assert result["buy_reason"] == "v2"
+
+    def test_count_analyses(self):
+        """Compte les analyses."""
+        assert self.db.count_trade_analyses() == 0
+        self.db.insert_trade_analysis({
+            "trade_id": 1, "primary_news_id": None,
+            "catalyst_type": "EARNINGS", "catalyst_summary": "test",
+            "catalyst_confidence": 0.5, "news_sentiment": 0.0,
+            "buy_reason": "x", "sell_reason": "x",
+            "trade_quality": "BON", "model_used": "gpt-4o-mini",
+            "analyzed_at": "2026-02-24 19:00:00",
+        })
+        assert self.db.count_trade_analyses() == 1
+
+    def test_get_all_analyses(self):
+        """Recupere toutes les analyses."""
+        self.db.insert_trade_analysis({
+            "trade_id": 1, "primary_news_id": None,
+            "catalyst_type": "EARNINGS", "catalyst_summary": "test",
+            "catalyst_confidence": 0.85, "news_sentiment": 0.6,
+            "buy_reason": "x", "sell_reason": "x",
+            "trade_quality": "BON", "model_used": "gpt-4o-mini",
+            "analyzed_at": "2026-02-24 19:00:00",
+        })
+        results = self.db.get_all_trade_analyses()
+        assert len(results) == 1
+        assert results[0]["trade_id"] == 1

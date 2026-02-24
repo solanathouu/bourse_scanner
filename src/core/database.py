@@ -112,6 +112,27 @@ class Database:
                 ON trade_catalyseurs(news_id);
         """)
 
+        # Table trade_analyses_llm (etape 4 bis — analyse LLM)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS trade_analyses_llm (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id INTEGER NOT NULL UNIQUE,
+                primary_news_id INTEGER,
+                catalyst_type TEXT NOT NULL,
+                catalyst_summary TEXT NOT NULL,
+                catalyst_confidence REAL NOT NULL,
+                news_sentiment REAL,
+                buy_reason TEXT,
+                sell_reason TEXT,
+                trade_quality TEXT,
+                model_used TEXT DEFAULT 'gpt-4o-mini',
+                analyzed_at TEXT NOT NULL,
+                FOREIGN KEY (trade_id) REFERENCES trades_complets(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_analyses_trade
+                ON trade_analyses_llm(trade_id);
+        """)
+
         conn.close()
         logger.info(f"Base de données initialisée: {self.db_path}")
 
@@ -395,6 +416,52 @@ class Database:
         conn.commit()
         conn.close()
         logger.info("Table trade_catalyseurs videe")
+
+    # --- Trade Analyses LLM ---
+
+    def insert_trade_analysis(self, analysis: dict):
+        """Insere ou remplace une analyse LLM pour un trade."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT OR REPLACE INTO trade_analyses_llm
+                (trade_id, primary_news_id, catalyst_type, catalyst_summary,
+                 catalyst_confidence, news_sentiment, buy_reason, sell_reason,
+                 trade_quality, model_used, analyzed_at)
+            VALUES
+                (:trade_id, :primary_news_id, :catalyst_type, :catalyst_summary,
+                 :catalyst_confidence, :news_sentiment, :buy_reason, :sell_reason,
+                 :trade_quality, :model_used, :analyzed_at)
+        """, analysis)
+        conn.commit()
+        conn.close()
+
+    def get_trade_analysis(self, trade_id: int) -> dict | None:
+        """Recupere l'analyse LLM pour un trade. None si absente."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM trade_analyses_llm WHERE trade_id = ?",
+            (trade_id,),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_all_trade_analyses(self) -> list[dict]:
+        """Recupere toutes les analyses LLM."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM trade_analyses_llm ORDER BY trade_id"
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def count_trade_analyses(self) -> int:
+        """Compte le nombre d'analyses LLM."""
+        conn = self._connect()
+        count = conn.execute(
+            "SELECT COUNT(*) FROM trade_analyses_llm"
+        ).fetchone()[0]
+        conn.close()
+        return count
 
     def get_news_in_window(self, ticker: str, date_start: str, date_end: str) -> list[dict]:
         """Recupere les news pour un ticker dans une fenetre de dates."""
