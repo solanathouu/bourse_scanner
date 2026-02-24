@@ -5,7 +5,7 @@ Bot Python de veille boursiere PEA. Analyse des donnees marche en temps reel, co
 ## Commandes
 
 ```bash
-uv run pytest tests/ -v          # Lancer tous les tests (167 tests)
+uv run pytest tests/ -v          # Lancer tous les tests (183 tests)
 uv run pytest tests/ -v -x       # Stopper au premier echec
 uv run python scripts/init_db.py       # Initialiser la base SQLite
 uv run python scripts/import_pdfs.py   # Importer les PDF dans la base
@@ -22,6 +22,9 @@ uv run python scripts/train_model.py               # Entrainer le modele + evalu
 uv run python scripts/train_model.py --features     # Explorer les features
 uv run python scripts/analyze_features.py           # Stats gagnants vs perdants
 uv run python scripts/analyze_features.py --trade 42  # Features d'un trade specifique
+uv run python scripts/analyze_trades_llm.py           # Analyser trades via GPT-4o-mini
+uv run python scripts/analyze_trades_llm.py --trade 42  # Analyser un trade specifique
+uv run python scripts/analyze_trades_llm.py --stats     # Stats des analyses LLM
 ```
 
 ## Architecture
@@ -32,7 +35,7 @@ pea-scanner/
 │   ├── core/                   # Couche fondation (BDD, logging, config)
 │   ├── extraction/             # Module 1: Extraction PDF -> SQLite
 │   ├── data_collection/        # Module 2: Collecte prix/news (4 sources actives)
-│   ├── analysis/               # Module 3: NewsClassifier, TechnicalIndicators, FeatureEngine, CatalystMatcher
+│   ├── analysis/               # Module 3: LLMAnalyzer, NewsClassifier, TechnicalIndicators, FeatureEngine, CatalystMatcher
 │   ├── model/                  # Module 4: Trainer (XGBoost), Evaluator
 │   └── alerts/                 # Module 5: Telegram (a venir)
 ├── scripts/                    # Points d'entree CLI
@@ -76,6 +79,7 @@ core (fondation, 0 deps internes)
 | Prix | yfinance |
 | News | gnews, Alpha Vantage API, Marketaux API, RSS (feedparser) |
 | ML | xgboost, scikit-learn |
+| LLM | openai (GPT-4o-mini) |
 | Indicateurs techniques | ta (RSI, MACD, Bollinger, ATR) |
 | Scheduler | APScheduler |
 | Telegram | python-telegram-bot |
@@ -90,6 +94,7 @@ SQLite dans `data/trades.db`. Tables principales:
 - `executions` — Avis d'execution PDF parses (1 ligne = 1 PDF)
 - `trades_complets` — Trades reconstitues achat->vente (FIFO)
 - `trade_catalyseurs` — News/events associes a chaque trade
+- `trade_analyses_llm` — Analyses LLM des trades (catalyseur, raison achat/vente, qualite)
 - `prices` — Prix OHLCV collectes
 - `indicators` — Indicateurs techniques calcules
 - `news` — Actualites collectees
@@ -103,6 +108,7 @@ SQLite dans `data/trades.db`. Tables principales:
 | 2 | DONE | Collecte donnees historiques — 4 sources, 1357 prix, 1824 news |
 | 3 | DONE | Correlation historique — catalyst_matcher, 649 associations, 113/166 trades |
 | 4 | DONE | Feature engineering + ML — NewsClassifier, TechnicalIndicators, FeatureEngine, XGBoost Trainer, Evaluator |
+| 4bis | DONE | LLM Trade Analysis — GPT-4o-mini analyse 141 trades, remplace regex par analyse profonde |
 | 5 | TODO | Pipeline temps reel + alertes Telegram |
 | 6 | TODO | Tests integration, stabilisation, deploiement VPS |
 
@@ -110,12 +116,12 @@ SQLite dans `data/trades.db`. Tables principales:
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1+2+3+4 DONE | pdf_parser, trade_matcher, database, 4 collectors, ticker_mapper, catalyst_matcher, news_classifier, technical_indicators, feature_engine, trainer, evaluator, CLI |
-| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY |
-| Tests | 167/167 PASS | database(18), pdf_parser(17), trade_matcher(7), ticker_mapper(9), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(13), trainer(10), evaluator(6) |
-| Data | Collectee + correlee | 214 exec, 166 trades, 1357 prix, 1824 news, 649 catalyseurs |
-| Docs | Design + plans Etapes 2-4 | docs/plans/2026-02-22-etape*-*.md, 2026-02-23-etape4-*.md |
-| Git | Pushe sur origin | 19 commits, master a jour |
+| Code | Etape 1+2+3+4+4bis DONE | pdf_parser, trade_matcher, database, 4 collectors, ticker_mapper, catalyst_matcher, news_classifier, technical_indicators, feature_engine, llm_analyzer, trainer, evaluator, CLI |
+| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + OPENAI_API_KEY |
+| Tests | 183/183 PASS | database(23), pdf_parser(17), trade_matcher(7), ticker_mapper(9), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(15), llm_analyzer(10), trainer(10), evaluator(6) |
+| Data | Collectee + LLM analysee | 214 exec, 166 trades, 1357 prix, 1824 news, 649 catalyseurs, 141 analyses LLM |
+| Docs | Design + plans Etapes 2-4bis | docs/plans/2026-02-22-etape*-*.md, 2026-02-23-etape4-*.md, 2026-02-24-etape4-llm-*.md |
+| Git | Pushe sur origin | 27 commits, master a jour |
 
 ## Sources de donnees actives
 
