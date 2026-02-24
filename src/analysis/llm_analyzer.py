@@ -212,10 +212,19 @@ class LLMAnalyzer:
             "analyzed_at": now,
         }
 
+        # Nettoyer le texte (GPT-4o-mini enveloppe parfois dans ```json ... ```)
+        cleaned = response_text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            # Retirer premiere et derniere ligne (```json et ```)
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            cleaned = "\n".join(lines).strip()
+
         try:
-            data = json.loads(response_text)
+            data = json.loads(cleaned)
         except json.JSONDecodeError:
-            logger.error(f"Trade #{trade_id}: reponse LLM non-JSON")
+            logger.error(f"Trade #{trade_id}: reponse LLM non-JSON: "
+                         f"{response_text[:100]}")
             return fallback
 
         # Resoudre primary_news_id

@@ -136,6 +136,24 @@ class TestParseResponse:
         assert result["catalyst_type"] == "TECHNICAL"
         assert result["primary_news_id"] is None
 
+    def test_parse_markdown_wrapped_json(self):
+        """Parse un JSON enveloppe dans des backticks markdown."""
+        inner = json.dumps({
+            "primary_news_index": 1,
+            "catalyst_type": "EARNINGS",
+            "catalyst_confidence": 0.85,
+            "catalyst_summary": "Nicolas a achete car resultats T2 solides",
+            "news_sentiment": 0.7,
+            "buy_reason": "Resultats T2",
+            "sell_reason": "Objectif atteint",
+            "trade_quality": "BON",
+        })
+        response = f"```json\n{inner}\n```"
+        result = self.analyzer.parse_response(response, trade_id=1,
+                                               news_list=[{"id": 42}])
+        assert result["catalyst_type"] == "EARNINGS"
+        assert result["catalyst_confidence"] == 0.85
+
     def test_parse_invalid_json_returns_fallback(self):
         """Retourne un fallback si le JSON est invalide."""
         result = self.analyzer.parse_response("not json", trade_id=1,
