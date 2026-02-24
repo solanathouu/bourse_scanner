@@ -75,6 +75,19 @@ def _seed_test_db(db: Database):
     ])
     # Pas de catalyseurs pour trade 2
 
+    # Analyse LLM pour trade 1
+    db.insert_trade_analysis({
+        "trade_id": 1, "primary_news_id": 1,
+        "catalyst_type": "EARNINGS",
+        "catalyst_summary": "Nicolas a achete car resultats T2 solides",
+        "catalyst_confidence": 0.85, "news_sentiment": 0.6,
+        "buy_reason": "CA en hausse de 8% au T2",
+        "sell_reason": "Objectif de +5% atteint",
+        "trade_quality": "BON", "model_used": "gpt-4o-mini",
+        "analyzed_at": "2026-02-24 19:00:00",
+    })
+    # Pas d'analyse LLM pour trade 2
+
 
 class TestBuildTradeFeatures:
     """Tests de construction des features pour un trade."""
@@ -106,13 +119,14 @@ class TestBuildTradeFeatures:
         assert "bollinger_position" in result
 
     def test_build_has_catalyst_features(self):
-        """Le dict contient les features catalyseur."""
+        """Le dict contient les features catalyseur LLM."""
         trades = self.db.get_all_trades()
         result = self.engine.build_trade_features(trades[0])
         assert "catalyst_type" in result
-        assert "nb_catalysts" in result
-        assert "best_catalyst_score" in result
-        assert "has_text_match" in result
+        assert "catalyst_confidence" in result
+        assert "news_sentiment" in result
+        assert "trade_quality_score" in result
+        assert "has_clear_catalyst" in result
 
     def test_build_has_context_features(self):
         """Le dict contient les features contexte."""
@@ -132,20 +146,22 @@ class TestBuildTradeFeatures:
         result = self.engine.build_trade_features(trades[1])
         assert result["is_winner"] == 0
 
-    def test_trade_with_catalysts_has_type(self):
-        """Un trade avec catalyseurs a un catalyst_type != TECHNICAL."""
+    def test_trade_with_llm_analysis_uses_it(self):
+        """Un trade avec analyse LLM utilise les features LLM."""
         trades = self.db.get_all_trades()
         result = self.engine.build_trade_features(trades[0])
-        # News "resultats T2" = EARNINGS, "FDA approves" = FDA_REGULATORY
-        assert result["catalyst_type"] != "TECHNICAL"
-        assert result["nb_catalysts"] == 2
+        assert result["catalyst_type"] == "EARNINGS"
+        assert result["catalyst_confidence"] == 0.85
+        assert result["has_clear_catalyst"] == 1
+        assert result["trade_quality_score"] == 3  # BON = 3
 
-    def test_trade_without_catalysts_is_technical(self):
-        """Un trade sans catalyseurs a catalyst_type == TECHNICAL."""
+    def test_trade_without_llm_falls_back(self):
+        """Un trade sans analyse LLM utilise le fallback TECHNICAL."""
         trades = self.db.get_all_trades()
         result = self.engine.build_trade_features(trades[1])
         assert result["catalyst_type"] == "TECHNICAL"
-        assert result["nb_catalysts"] == 0
+        assert result["catalyst_confidence"] == 0.0
+        assert result["has_clear_catalyst"] == 0
 
     def test_context_second_trade_has_history(self):
         """Le 2e trade SANOFI connait l'historique (1 trade precedent)."""

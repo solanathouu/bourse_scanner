@@ -10,7 +10,6 @@ from loguru import logger
 from src.core.database import Database
 from src.data_collection.ticker_mapper import TickerMapper, TickerNotFoundError
 from src.analysis.technical_indicators import TechnicalIndicators
-from src.analysis.news_classifier import NewsClassifier
 
 
 # Colonnes de features techniques retournees par TechnicalIndicators
@@ -23,10 +22,10 @@ TECHNICAL_FEATURES = [
     "distance_sma20", "distance_sma50",
 ]
 
-# Colonnes de features catalyseur
+# Colonnes de features catalyseur (LLM-based)
 CATALYST_FEATURES = [
-    "catalyst_type", "nb_catalysts", "best_catalyst_score",
-    "has_text_match", "sentiment_avg", "nb_news_sources",
+    "catalyst_type", "catalyst_confidence", "news_sentiment",
+    "trade_quality_score", "has_clear_catalyst", "buy_reason_length",
 ]
 
 # Colonnes de features contexte
@@ -42,7 +41,6 @@ class FeatureEngine:
     def __init__(self, db: Database):
         self.db = db
         self.tech = TechnicalIndicators()
-        self.classifier = NewsClassifier()
         self.mapper = TickerMapper()
         # Cache des DataFrames de prix enrichis par ticker
         self._price_cache: dict[str, pd.DataFrame] = {}
@@ -70,57 +68,33 @@ class FeatureEngine:
         return self.tech.get_indicators_at_date(enriched, date_achat)
 
     def _build_catalyst_features(self, trade: dict) -> dict:
-        """Construit les features catalyseur pour un trade."""
-        trade_id = trade["id"]
-        catalyseurs = self.db.get_catalyseurs(trade_id)
+        """Construit les features catalyseur pour un trade.
 
-        if not catalyseurs:
+        Utilise l'analyse LLM si disponible, sinon fallback TECHNICAL.
+        """
+        trade_id = trade["id"]
+        analysis = self.db.get_trade_analysis(trade_id)
+
+        if analysis:
+            quality_map = {"EXCELLENT": 4, "BON": 3, "MOYEN": 2, "MAUVAIS": 1}
             return {
-                "catalyst_type": "TECHNICAL",
-                "nb_catalysts": 0,
-                "best_catalyst_score": 0.0,
-                "has_text_match": 0,
-                "sentiment_avg": 0.0,
-                "nb_news_sources": 0,
+                "catalyst_type": analysis["catalyst_type"],
+                "catalyst_confidence": analysis["catalyst_confidence"],
+                "news_sentiment": analysis["news_sentiment"] or 0.0,
+                "trade_quality_score": quality_map.get(
+                    analysis["trade_quality"], 2),
+                "has_clear_catalyst": 1 if analysis["primary_news_id"] else 0,
+                "buy_reason_length": len(analysis["buy_reason"] or ""),
             }
 
-        # Recuperer les news liees aux catalyseurs pour classifier
-        news_with_types = []
-        sentiments = []
-        sources = set()
-
-        for cat in catalyseurs:
-            news_id = cat["news_id"]
-            conn = self.db._connect()
-            news_row = conn.execute(
-                "SELECT * FROM news WHERE id = ?", (news_id,)
-            ).fetchone()
-            conn.close()
-
-            if news_row:
-                news = dict(news_row)
-                cat_type = self.classifier.classify(
-                    news.get("title", ""), news.get("description")
-                )
-                news_with_types.append({
-                    "catalyst_type": cat_type,
-                    "score_pertinence": cat["score_pertinence"],
-                })
-                if news.get("sentiment") is not None:
-                    sentiments.append(news["sentiment"])
-                if news.get("source_api"):
-                    sources.add(news["source_api"])
-
-        # Resumer les types pour ce trade
-        summary = self.classifier.summarize_for_trade(news_with_types)
-
+        # Fallback: pas d'analyse LLM
         return {
-            "catalyst_type": summary["primary_type"],
-            "nb_catalysts": len(catalyseurs),
-            "best_catalyst_score": max(c["score_pertinence"] for c in catalyseurs),
-            "has_text_match": 1 if any(c["match_texte"] for c in catalyseurs) else 0,
-            "sentiment_avg": sum(sentiments) / len(sentiments) if sentiments else 0.0,
-            "nb_news_sources": len(sources),
+            "catalyst_type": "TECHNICAL",
+            "catalyst_confidence": 0.0,
+            "news_sentiment": 0.0,
+            "trade_quality_score": 2,
+            "has_clear_catalyst": 0,
+            "buy_reason_length": 0,
         }
 
     def _build_context_features(self, trade: dict, all_trades: list[dict]) -> dict:
