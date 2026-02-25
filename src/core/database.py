@@ -133,6 +133,26 @@ class Database:
                 ON trade_analyses_llm(trade_id);
         """)
 
+        # Table fundamentals (etape 4ter — donnees fondamentales yfinance)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS fundamentals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                pe_ratio REAL,
+                pb_ratio REAL,
+                market_cap INTEGER,
+                dividend_yield REAL,
+                target_price REAL,
+                analyst_count INTEGER,
+                recommendation TEXT,
+                earnings_date TEXT,
+                UNIQUE(ticker, date)
+            );
+            CREATE INDEX IF NOT EXISTS idx_fundamentals_ticker_date
+                ON fundamentals(ticker, date);
+        """)
+
         conn.close()
         logger.info(f"Base de données initialisée: {self.db_path}")
 
@@ -463,6 +483,25 @@ class Database:
         conn.close()
         return count
 
+    def get_news_without_sentiment(self) -> list[dict]:
+        """Recupere les news sans sentiment (NULL)."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM news WHERE sentiment IS NULL ORDER BY id"
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def update_news_sentiment(self, news_id: int, sentiment: float):
+        """Met a jour le sentiment d'une news."""
+        conn = self._connect()
+        conn.execute(
+            "UPDATE news SET sentiment = ? WHERE id = ?",
+            (sentiment, news_id),
+        )
+        conn.commit()
+        conn.close()
+
     def get_news_in_window(self, ticker: str, date_start: str, date_end: str) -> list[dict]:
         """Recupere les news pour un ticker dans une fenetre de dates."""
         conn = self._connect()
@@ -474,3 +513,48 @@ class Database:
         """, (ticker, date_start, date_end)).fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    # --- Fundamentals ---
+
+    def insert_fundamental(self, fundamental: dict):
+        """Insere des donnees fondamentales. Ignore les doublons (ticker+date)."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT OR IGNORE INTO fundamentals
+                (ticker, date, pe_ratio, pb_ratio, market_cap,
+                 dividend_yield, target_price, analyst_count,
+                 recommendation, earnings_date)
+            VALUES
+                (:ticker, :date, :pe_ratio, :pb_ratio, :market_cap,
+                 :dividend_yield, :target_price, :analyst_count,
+                 :recommendation, :earnings_date)
+        """, fundamental)
+        conn.commit()
+        conn.close()
+
+    def get_fundamentals(self, ticker: str) -> list[dict]:
+        """Recupere les fondamentaux pour un ticker, tries par date."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM fundamentals WHERE ticker = ? ORDER BY date",
+            (ticker,),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_fundamental_at_date(self, ticker: str, date: str) -> dict | None:
+        """Recupere les fondamentaux les plus recents pour un ticker a une date."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM fundamentals WHERE ticker = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+            (ticker, date),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def count_fundamentals(self) -> int:
+        """Compte le nombre total de fondamentaux."""
+        conn = self._connect()
+        count = conn.execute("SELECT COUNT(*) FROM fundamentals").fetchone()[0]
+        conn.close()
+        return count

@@ -414,6 +414,127 @@ class TestCatalyseursTable:
         assert result[0]["title"] == "Sanofi annonce resultats"
 
 
+class TestNewsSentimentUpdate:
+    """Tests pour get_news_without_sentiment et update_news_sentiment."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_get_news_without_sentiment(self):
+        """Recupere les news sans sentiment."""
+        self.db.insert_news_batch([
+            {"ticker": "SAN.PA", "title": "News 1", "source": "BFM",
+             "url": "https://example.com/1", "published_at": "2025-06-15",
+             "description": "Desc", "sentiment": None, "source_api": "gnews"},
+            {"ticker": "SAN.PA", "title": "News 2", "source": "Reuters",
+             "url": "https://example.com/2", "published_at": "2025-06-16",
+             "description": "Desc", "sentiment": 0.5, "source_api": "alpha_vantage"},
+        ])
+        result = self.db.get_news_without_sentiment()
+        assert len(result) == 1
+        assert result[0]["title"] == "News 1"
+
+    def test_update_news_sentiment(self):
+        """Met a jour le sentiment d'une news."""
+        self.db.insert_news({
+            "ticker": "SAN.PA", "title": "News 1", "source": "BFM",
+            "url": "https://example.com/1", "published_at": "2025-06-15",
+            "description": "Desc",
+        })
+        news = self.db.get_news("SAN.PA")
+        assert news[0]["sentiment"] is None
+
+        self.db.update_news_sentiment(news[0]["id"], 0.75)
+
+        news = self.db.get_news("SAN.PA")
+        assert news[0]["sentiment"] == 0.75
+        # Plus dans la liste sans sentiment
+        assert len(self.db.get_news_without_sentiment()) == 0
+
+
+class TestFundamentalsTable:
+    """Tests pour la table fundamentals."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_and_get_fundamental(self):
+        """Insere et recupere des fondamentaux."""
+        fundamental = {
+            "ticker": "SAN.PA", "date": "2026-02-24",
+            "pe_ratio": 15.2, "pb_ratio": 2.1,
+            "market_cap": 120000000000, "dividend_yield": 3.5,
+            "target_price": 105.0, "analyst_count": 28,
+            "recommendation": "buy", "earnings_date": "2026-04-25",
+        }
+        self.db.insert_fundamental(fundamental)
+        result = self.db.get_fundamentals("SAN.PA")
+        assert len(result) == 1
+        assert result[0]["pe_ratio"] == 15.2
+        assert result[0]["recommendation"] == "buy"
+
+    def test_insert_fundamental_doublon_ignore(self):
+        """Un doublon (meme ticker+date) est ignore."""
+        f = {"ticker": "SAN.PA", "date": "2026-02-24",
+             "pe_ratio": 15.0, "pb_ratio": None, "market_cap": None,
+             "dividend_yield": None, "target_price": None,
+             "analyst_count": None, "recommendation": None,
+             "earnings_date": None}
+        self.db.insert_fundamental(f)
+        self.db.insert_fundamental(f)
+        assert self.db.count_fundamentals() == 1
+
+    def test_get_fundamental_at_date(self):
+        """Recupere le fondamental le plus recent avant une date."""
+        self.db.insert_fundamental({
+            "ticker": "SAN.PA", "date": "2026-01-15",
+            "pe_ratio": 14.0, "pb_ratio": None, "market_cap": None,
+            "dividend_yield": None, "target_price": None,
+            "analyst_count": None, "recommendation": None,
+            "earnings_date": None,
+        })
+        self.db.insert_fundamental({
+            "ticker": "SAN.PA", "date": "2026-02-15",
+            "pe_ratio": 15.5, "pb_ratio": None, "market_cap": None,
+            "dividend_yield": None, "target_price": None,
+            "analyst_count": None, "recommendation": None,
+            "earnings_date": None,
+        })
+        # Au 2026-02-20, le plus recent est celui du 2026-02-15
+        result = self.db.get_fundamental_at_date("SAN.PA", "2026-02-20")
+        assert result is not None
+        assert result["pe_ratio"] == 15.5
+
+    def test_get_fundamental_at_date_none(self):
+        """Retourne None si aucun fondamental avant la date."""
+        result = self.db.get_fundamental_at_date("SAN.PA", "2026-02-20")
+        assert result is None
+
+    def test_count_fundamentals(self):
+        """Compte les fondamentaux."""
+        assert self.db.count_fundamentals() == 0
+        self.db.insert_fundamental({
+            "ticker": "SAN.PA", "date": "2026-02-24",
+            "pe_ratio": 15.0, "pb_ratio": None, "market_cap": None,
+            "dividend_yield": None, "target_price": None,
+            "analyst_count": None, "recommendation": None,
+            "earnings_date": None,
+        })
+        assert self.db.count_fundamentals() == 1
+
+
 class TestTradeAnalysesLLM:
     """Tests CRUD pour la table trade_analyses_llm."""
 

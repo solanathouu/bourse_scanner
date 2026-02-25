@@ -1,8 +1,10 @@
 """Assemblage du vecteur de features pour chaque trade de Nicolas.
 
 Combine les indicateurs techniques (au moment de l'achat), le type de
-catalyseur, et le contexte personnel (historique de trading sur l'action).
+catalyseur, les donnees fondamentales, et le contexte personnel.
 """
+
+from datetime import datetime
 
 import pandas as pd
 from loguru import logger
@@ -28,11 +30,22 @@ CATALYST_FEATURES = [
     "has_clear_catalyst", "buy_reason_length",
 ]
 
+# Colonnes de features fondamentales
+FUNDAMENTAL_FEATURES = [
+    "pe_ratio", "pb_ratio", "target_upside_pct",
+    "analyst_count", "days_to_earnings", "recommendation_score",
+]
+
 # Colonnes de features contexte
 CONTEXT_FEATURES = [
     "day_of_week", "nb_previous_trades",
     "previous_win_rate", "days_since_last_trade",
 ]
+
+RECOMMENDATION_SCORES = {
+    "strongBuy": 5, "buy": 4, "hold": 3,
+    "underperform": 2, "sell": 2, "strongSell": 1,
+}
 
 
 class FeatureEngine:
@@ -91,6 +104,58 @@ class FeatureEngine:
             "news_sentiment": 0.0,
             "has_clear_catalyst": 0,
             "buy_reason_length": 0,
+        }
+
+    def _build_fundamental_features(self, ticker: str, date_achat: str,
+                                       prix_achat: float) -> dict:
+        """Construit les features fondamentales pour un trade.
+
+        Utilise les donnees fondamentales les plus recentes avant la date d'achat.
+        Retourne des valeurs par defaut si aucune donnee disponible.
+        """
+        default = {
+            "pe_ratio": 0.0, "pb_ratio": 0.0,
+            "target_upside_pct": 0.0, "analyst_count": 0,
+            "days_to_earnings": -1, "recommendation_score": 0,
+        }
+
+        fund = self.db.get_fundamental_at_date(ticker, date_achat)
+        if fund is None:
+            return default
+
+        pe = fund.get("pe_ratio") or 0.0
+        pb = fund.get("pb_ratio") or 0.0
+
+        # Target upside: (target - prix_achat) / prix_achat * 100
+        target = fund.get("target_price")
+        target_upside = 0.0
+        if target and prix_achat > 0:
+            target_upside = round((target - prix_achat) / prix_achat * 100, 2)
+
+        analysts = fund.get("analyst_count") or 0
+
+        # Days to earnings
+        days_to_earn = -1
+        earnings_date = fund.get("earnings_date")
+        if earnings_date:
+            try:
+                earn_dt = datetime.strptime(earnings_date[:10], "%Y-%m-%d")
+                achat_dt = datetime.strptime(date_achat[:10], "%Y-%m-%d")
+                days_to_earn = (earn_dt - achat_dt).days
+            except ValueError:
+                pass
+
+        # Recommendation score
+        reco = fund.get("recommendation") or ""
+        reco_score = RECOMMENDATION_SCORES.get(reco, 0)
+
+        return {
+            "pe_ratio": pe,
+            "pb_ratio": pb,
+            "target_upside_pct": target_upside,
+            "analyst_count": analysts,
+            "days_to_earnings": days_to_earn,
+            "recommendation_score": reco_score,
         }
 
     def _build_context_features(self, trade: dict, all_trades: list[dict]) -> dict:
@@ -166,6 +231,11 @@ class FeatureEngine:
         # Features catalyseur
         cat_features = self._build_catalyst_features(trade)
 
+        # Features fondamentales
+        fund_features = self._build_fundamental_features(
+            ticker, date_achat, trade["prix_achat"]
+        )
+
         # Features contexte
         ctx_features = self._build_context_features(trade, all_trades)
 
@@ -177,6 +247,7 @@ class FeatureEngine:
             "trade_id": trade["id"],
             **tech_features,
             **cat_features,
+            **fund_features,
             **ctx_features,
             "is_winner": is_winner,
         }
@@ -213,4 +284,5 @@ class FeatureEngine:
 
     def get_feature_names(self) -> list[str]:
         """Liste ordonnee des noms de features (sans target ni trade_id)."""
-        return TECHNICAL_FEATURES + CATALYST_FEATURES + CONTEXT_FEATURES
+        return (TECHNICAL_FEATURES + CATALYST_FEATURES
+                + FUNDAMENTAL_FEATURES + CONTEXT_FEATURES)

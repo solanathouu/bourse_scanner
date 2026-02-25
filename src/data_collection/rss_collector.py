@@ -14,7 +14,7 @@ RSS_FEEDS = {
     # Google News FR — large couverture bourse/actions
     "google_news_bourse": "https://news.google.com/rss/search?q=bourse+paris+actions&hl=fr&gl=FR&ceid=FR:fr",
     "google_news_cac40": "https://news.google.com/rss/search?q=CAC+40&hl=fr&gl=FR&ceid=FR:fr",
-    # Recherches ciblees par action (les plus tradees)
+    # Recherches ciblees par action — les 7 originales
     "google_news_sanofi": "https://news.google.com/rss/search?q=Sanofi+bourse&hl=fr&gl=FR&ceid=FR:fr",
     "google_news_schneider": "https://news.google.com/rss/search?q=Schneider+Electric+bourse&hl=fr&gl=FR&ceid=FR:fr",
     "google_news_air_liquide": "https://news.google.com/rss/search?q=Air+Liquide+bourse&hl=fr&gl=FR&ceid=FR:fr",
@@ -22,11 +22,27 @@ RSS_FEEDS = {
     "google_news_nanobiotix": "https://news.google.com/rss/search?q=Nanobiotix+bourse&hl=fr&gl=FR&ceid=FR:fr",
     "google_news_valneva": "https://news.google.com/rss/search?q=Valneva+bourse&hl=fr&gl=FR&ceid=FR:fr",
     "google_news_inventiva": "https://news.google.com/rss/search?q=Inventiva+bourse&hl=fr&gl=FR&ceid=FR:fr",
-    # Sites financiers avec RSS actifs
+    # 12 actions manquantes ajoutees (etape 4ter)
+    "google_news_adocia": "https://news.google.com/rss/search?q=Adocia+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_ab_science": "https://news.google.com/rss/search?q=AB+Science+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_exail": "https://news.google.com/rss/search?q=Exail+Technologies+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_genfit": "https://news.google.com/rss/search?q=Genfit+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_kalray": "https://news.google.com/rss/search?q=Kalray+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_maurel": "https://news.google.com/rss/search?q=Maurel+Prom+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_memscap": "https://news.google.com/rss/search?q=Memscap+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_technip": "https://news.google.com/rss/search?q=Technip+Energies+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_2crsi": "https://news.google.com/rss/search?q=2CRSI+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_blockchain_group": "https://news.google.com/rss/search?q=Blockchain+Group+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_amundi_etf": "https://news.google.com/rss/search?q=Amundi+ETF+MSCI+World&hl=fr&gl=FR&ceid=FR:fr",
+    "google_news_afyren": "https://news.google.com/rss/search?q=Afyren+bourse&hl=fr&gl=FR&ceid=FR:fr",
+    # Sites financiers FR avec RSS actifs
     "yahoo_fr": "https://fr.finance.yahoo.com/rss/",
     "investing_fr": "https://fr.investing.com/rss/news.rss",
     "la_tribune": "https://www.latribune.fr/rss/rubriques/bourse.html",
     "seeking_alpha": "https://seekingalpha.com/market_currents.xml",
+    # Sites financiers supplementaires (etape 4ter)
+    "boursorama_actualites": "https://www.boursorama.com/rss/actualites",
+    "capital_bourse": "https://www.capital.fr/entreprises-marches/rss",
 }
 
 DELAY_BETWEEN_FEEDS = 2  # secondes

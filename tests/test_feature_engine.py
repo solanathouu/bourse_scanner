@@ -88,6 +88,15 @@ def _seed_test_db(db: Database):
     })
     # Pas d'analyse LLM pour trade 2
 
+    # Fondamentaux pour SANOFI
+    db.insert_fundamental({
+        "ticker": "SAN.PA", "date": "2025-06-01",
+        "pe_ratio": 15.2, "pb_ratio": 2.1,
+        "market_cap": 120000000000, "dividend_yield": 3.5,
+        "target_price": 105.0, "analyst_count": 28,
+        "recommendation": "buy", "earnings_date": "2025-07-25",
+    })
+
 
 class TestBuildTradeFeatures:
     """Tests de construction des features pour un trade."""
@@ -160,6 +169,46 @@ class TestBuildTradeFeatures:
         assert result["catalyst_type"] == "TECHNICAL"
         assert result["catalyst_confidence"] == 0.0
         assert result["has_clear_catalyst"] == 0
+
+    def test_build_has_fundamental_features(self):
+        """Le dict contient les features fondamentales."""
+        trades = self.db.get_all_trades()
+        result = self.engine.build_trade_features(trades[0])
+        assert "pe_ratio" in result
+        assert "pb_ratio" in result
+        assert "target_upside_pct" in result
+        assert "analyst_count" in result
+        assert "days_to_earnings" in result
+        assert "recommendation_score" in result
+
+    def test_trade_with_fundamentals(self):
+        """Un trade avec fondamentaux utilise les donnees reelles."""
+        trades = self.db.get_all_trades()
+        result = self.engine.build_trade_features(trades[0])
+        assert result["pe_ratio"] == 15.2
+        assert result["analyst_count"] == 28
+        assert result["recommendation_score"] == 4  # "buy"
+        # target_upside = (105 - 95) / 95 * 100 = 10.53%
+        assert abs(result["target_upside_pct"] - 10.53) < 0.1
+
+    def test_trade_without_fundamentals_defaults(self):
+        """Un trade sans fondamentaux utilise les valeurs par defaut."""
+        # Trade 2 date_achat=2025-08-15, fondamentaux date=2025-06-01 (avant)
+        # mais on va tester un cas sans aucun fondamental
+        # Creer un nouveau trade pour une action sans fondamentaux
+        self.db.insert_trade_complet({
+            "isin": "FR9999999999", "nom_action": "AIR LIQUIDE",
+            "date_achat": "2025-01-01", "date_vente": "2025-01-10",
+            "prix_achat": 150.0, "prix_vente": 155.0, "quantite": 5,
+            "rendement_brut_pct": 3.33, "rendement_net_pct": 3.0,
+            "duree_jours": 9, "frais_totaux": 5.0, "statut": "CLOTURE",
+        })
+        # AI.PA n'a pas de prix, donc build_trade_features retourne None
+        # Testons _build_fundamental_features directement
+        result = self.engine._build_fundamental_features("AI.PA", "2025-01-01", 150.0)
+        assert result["pe_ratio"] == 0.0
+        assert result["analyst_count"] == 0
+        assert result["days_to_earnings"] == -1
 
     def test_context_second_trade_has_history(self):
         """Le 2e trade SANOFI connait l'historique (1 trade precedent)."""
