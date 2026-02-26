@@ -1,17 +1,19 @@
 """Formatage des messages d'alerte Telegram.
 
-Produit des messages Markdown lisibles avec score, catalyseur,
+Produit des messages HTML lisibles avec score, catalyseur,
 indicateurs techniques et disclaimer.
 """
 
+from html import escape
+
 
 class AlertFormatter:
-    """Formate les signaux en messages Telegram Markdown."""
+    """Formate les signaux en messages Telegram HTML."""
 
     def format_signal(self, signal: dict) -> str:
-        """Formate un signal en message Telegram."""
-        ticker = signal["ticker"]
-        name = signal.get("name", ticker)
+        """Formate un signal en message Telegram HTML."""
+        ticker = escape(signal["ticker"])
+        name = escape(signal.get("name", ticker))
         score = signal["score"]
         score_pct = int(score * 100)
 
@@ -20,7 +22,7 @@ class AlertFormatter:
         price_str = f"{price:.2f}" if price else "N/A"
 
         lines = [
-            f"*SIGNAL — {name} ({ticker})*",
+            f"<b>SIGNAL — {name} ({ticker})</b>",
             f"Score: {score_pct}% | Prix: {price_str} EUR",
             "",
         ]
@@ -29,15 +31,15 @@ class AlertFormatter:
         cat_type = signal.get("catalyst_type", "UNKNOWN")
         if cat_type and cat_type not in ("TECHNICAL", "UNKNOWN"):
             news_title = signal.get("catalyst_news_title") or ""
-            lines.append(f"Catalyseur: {cat_type}")
+            lines.append(f"Catalyseur: {escape(cat_type)}")
             if news_title:
-                lines.append(f'"{news_title}"')
+                lines.append(f'"{escape(news_title)}"')
             lines.append("")
 
         # Technique
         tech_summary = signal.get("technical_summary", "")
         if tech_summary and tech_summary != "N/A":
-            lines.append(f"Technique: {tech_summary}")
+            lines.append(f"Technique: {escape(tech_summary)}")
 
         # Fondamentaux
         fund_parts = []
@@ -52,28 +54,28 @@ class AlertFormatter:
             lines.append(f"Fondamentaux: {' | '.join(fund_parts)}")
 
         lines.append("")
-        lines.append("_Aide a la decision, pas un signal d'achat automatique._")
+        lines.append("<i>Aide a la decision, pas un signal d'achat automatique.</i>")
 
         return "\n".join(lines)
 
     def format_daily_summary(self, signals: list[dict]) -> str:
         """Formate un resume quotidien des signaux emis."""
         if not signals:
-            return "*Resume quotidien*\nAucun signal emis aujourd'hui."
+            return "<b>Resume quotidien</b>\nAucun signal emis aujourd'hui."
 
         lines = [
-            f"*Resume quotidien — {len(signals)} signal(s)*",
+            f"<b>Resume quotidien — {len(signals)} signal(s)</b>",
             "",
         ]
 
         for s in signals:
-            name = s.get("name", s["ticker"])
+            name = escape(s.get("name", s["ticker"]))
             score_pct = int(s["score"] * 100)
-            cat = s.get("catalyst_type", "")
+            cat = escape(s.get("catalyst_type", ""))
             lines.append(f"- {name}: {score_pct}% ({cat})")
 
         lines.append("")
-        lines.append("_Aide a la decision, pas un signal d'achat automatique._")
+        lines.append("<i>Aide a la decision, pas un signal d'achat automatique.</i>")
 
         return "\n".join(lines)
 

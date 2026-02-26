@@ -43,7 +43,7 @@ class TelegramBot:
             await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=message,
-                parse_mode=ParseMode.MARKDOWN,
+                parse_mode=ParseMode.HTML,
             )
             logger.info(f"Telegram: message envoye ({len(message)} chars)")
             return True
