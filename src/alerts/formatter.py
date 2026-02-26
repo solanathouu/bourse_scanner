@@ -16,11 +16,12 @@ class AlertFormatter:
         score_pct = int(score * 100)
 
         features = signal.get("features", {})
-        price = features.get("close") or signal.get("current_price", "N/A")
+        price = signal.get("current_price")
+        price_str = f"{price:.2f}" if price else "N/A"
 
         lines = [
             f"*SIGNAL — {name} ({ticker})*",
-            f"Score: {score_pct}% | Prix: {price} EUR",
+            f"Score: {score_pct}% | Prix: {price_str} EUR",
             "",
         ]
 

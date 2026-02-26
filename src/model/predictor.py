@@ -60,6 +60,7 @@ class Predictor:
             "ticker": ticker,
             "date": date,
             "score": round(score, 4),
+            "current_price": round(current_price, 2),
             "catalyst_type": features.get("catalyst_type", "UNKNOWN"),
             "catalyst_news_title": None,
             "features": features,

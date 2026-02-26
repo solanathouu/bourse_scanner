@@ -301,8 +301,21 @@ class FeatureEngine:
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
-        # Features techniques
+        # Features techniques — fallback sur la derniere date disponible
         tech_features = self._build_technical_features(ticker, date)
+        if tech_features is None:
+            enriched = self._get_enriched_prices(ticker)
+            if enriched is not None and not enriched.empty:
+                last_date = enriched["date"].max()
+                tech_features = self.tech.get_indicators_at_date(
+                    enriched, last_date
+                )
+                if tech_features is not None:
+                    logger.debug(
+                        f"Fallback date technique {ticker}: "
+                        f"{date} -> {last_date}"
+                    )
+                    date = last_date
         if tech_features is None:
             logger.warning(f"Pas de donnees techniques pour {ticker}")
             return None
