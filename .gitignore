@@ -12,9 +12,10 @@ wheels/
 # Environment secrets
 .env
 
-# Data (PDF personnels + base SQLite)
+# Data (PDF personnels + base SQLite + images)
 data/pdfs/
 data/*.db
+data/*.png
 
 # Models
 data/models/

@@ -1,0 +1,116 @@
+# Watchlist PEA Scanner — 30 valeurs de Nicolas
+# Les ETFs (CW8, ESE) sont surveilles en prix seulement, pas de scoring ML
+
+watchlist:
+  # --- Actions individuelles (28) ---
+  - name: "2CRSI"
+    ticker: "2CRSI.PA"
+    etf: false
+  - name: "AB SCIENCE"
+    ticker: "AB.PA"
+    etf: false
+  - name: "ADOCIA"
+    ticker: "ADOC.PA"
+    etf: false
+  - name: "AFYREN"
+    ticker: "AFYREN.PA"
+    etf: false
+  - name: "AVENIR TELECOM"
+    ticker: "AVT.PA"
+    etf: false
+  - name: "BIOSYNEX"
+    ticker: "ALBIO.PA"
+    etf: false
+  - name: "CAPITAL B."
+    ticker: "ALCAP.PA"
+    etf: false
+  - name: "CROSSJECT"
+    ticker: "ALCJ.PA"
+    etf: false
+  - name: "DBV TECHNOLOGIES"
+    ticker: "DBV.PA"
+    etf: false
+  - name: "EXAIL TECHNOLOGIES"
+    ticker: "EXA.PA"
+    etf: false
+  - name: "GENFIT"
+    ticker: "GNFT.PA"
+    etf: false
+  - name: "INVENTIVA"
+    ticker: "IVA.PA"
+    etf: false
+  - name: "KALRAY"
+    ticker: "ALKAL.PA"
+    etf: false
+  - name: "MAUREL ET PROM"
+    ticker: "MAU.PA"
+    etf: false
+  - name: "MEDIAN TECHNOLOG."
+    ticker: "ALMDT.PA"
+    etf: false
+  - name: "MEMSCAP REGROUPEES"
+    ticker: "MEMS.PA"
+    etf: false
+  - name: "NANOBIOTIX"
+    ticker: "NANO.PA"
+    etf: false
+  - name: "POXEL"
+    ticker: "POXEL.PA"
+    etf: false
+  - name: "REXEL"
+    ticker: "RXL.PA"
+    etf: false
+  - name: "SANOFI"
+    ticker: "SAN.PA"
+    etf: false
+  - name: "SCHNEIDER ELECTRIC SE"
+    ticker: "SU.PA"
+    etf: false
+  - name: "SENSORION"
+    ticker: "ALSEN.PA"
+    etf: false
+  - name: "SOITEC"
+    ticker: "SOI.PA"
+    etf: false
+  - name: "UBISOFT"
+    ticker: "UBI.PA"
+    etf: false
+  - name: "VALBIOTIS"
+    ticker: "ALVAL.PA"
+    etf: false
+  - name: "VALNEVA"
+    ticker: "VLA.PA"
+    etf: false
+  - name: "VINCI"
+    ticker: "DG.PA"
+    etf: false
+  - name: "WORLDLINE"
+    ticker: "WLN.PA"
+    etf: false
+
+  # --- ETFs (2) — prix seulement, pas de scoring ---
+  - name: "AMUNDI ETF MSCI WR"
+    ticker: "CW8.PA"
+    etf: true
+  - name: "BNPP SP500 EUR C"
+    ticker: "ESE.PA"
+    etf: true
+
+# Parametres du scanner
+scoring:
+  threshold: 0.75          # Score minimum pour alerte
+  cooldown_hours: 24       # Heures entre 2 alertes sur le meme ticker
+  model_path: "data/models/nicolas_v1.joblib"
+
+scheduler:
+  prices_interval_min: 2       # Refresh prix toutes les 2 min
+  news_interval_min: 10        # Collecte news toutes les 10 min
+  scoring_interval_min: 60     # Scoring toutes les 60 min
+  fundamentals_hour: 7         # Refresh fondamentaux a 7h
+
+market_hours:
+  open: "09:00"
+  close: "17:35"
+  scoring_open: "09:30"
+  scoring_close: "17:30"
+  timezone: "Europe/Paris"

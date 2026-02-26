@@ -52,6 +52,12 @@ class PriceCollector:
         logger.info(f"{len(prices)} prix inseres pour {ticker}")
         return len(prices)
 
+    def collect_recent(self, ticker: str, days: int = 5) -> int:
+        """Collecte les prix des N derniers jours pour un ticker."""
+        end = datetime.now().strftime("%Y-%m-%d")
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        return self.collect_for_ticker(ticker, start, end)
+
     def compute_date_ranges(self, trades: list[dict]) -> dict:
         """Calcule les plages de dates par action a partir des trades.
 

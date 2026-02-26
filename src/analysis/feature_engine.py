@@ -12,6 +12,7 @@ from loguru import logger
 from src.core.database import Database
 from src.data_collection.ticker_mapper import TickerMapper, TickerNotFoundError
 from src.analysis.technical_indicators import TechnicalIndicators
+from src.analysis.news_classifier import NewsClassifier
 
 
 # Colonnes de features techniques retournees par TechnicalIndicators
@@ -281,6 +282,128 @@ class FeatureEngine:
         df = pd.DataFrame(rows)
         logger.info(f"Matrice de features: {len(df)} lignes x {len(df.columns)} colonnes")
         return df
+
+    def build_realtime_features(self, ticker: str, current_price: float,
+                                   date: str | None = None) -> dict | None:
+        """Construit le vecteur de features pour un ticker en temps reel.
+
+        Utilise les donnees en BDD (prix, news recentes, fondamentaux)
+        pour assembler les memes features que build_trade_features().
+
+        Args:
+            ticker: Ticker Yahoo Finance (ex: SAN.PA).
+            current_price: Prix actuel du ticker.
+            date: Date au format YYYY-MM-DD. Si None, utilise aujourd'hui.
+
+        Returns:
+            Dict avec les features, ou None si pas assez de donnees.
+        """
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        # Features techniques
+        tech_features = self._build_technical_features(ticker, date)
+        if tech_features is None:
+            logger.warning(f"Pas de donnees techniques pour {ticker}")
+            return None
+
+        # Features catalyseur (news recentes)
+        cat_features = self._build_realtime_catalyst_features(ticker, date)
+
+        # Features fondamentales
+        fund_features = self._build_fundamental_features(
+            ticker, date, current_price
+        )
+
+        # Features contexte
+        ctx_features = self._build_realtime_context_features(ticker, date)
+
+        return {
+            **tech_features,
+            **cat_features,
+            **fund_features,
+            **ctx_features,
+        }
+
+    def _build_realtime_catalyst_features(self, ticker: str, date: str) -> dict:
+        """Construit les features catalyseur a partir des news recentes en BDD.
+
+        Regarde les news des 5 derniers jours, classifie avec NewsClassifier.
+        """
+        from datetime import timedelta
+
+        dt = datetime.strptime(date, "%Y-%m-%d")
+        date_start = (dt - timedelta(days=5)).strftime("%Y-%m-%d")
+
+        news_list = self.db.get_news_in_window(ticker, date_start, date)
+
+        if not news_list:
+            return {
+                "catalyst_type": "TECHNICAL",
+                "catalyst_confidence": 0.0,
+                "news_sentiment": 0.0,
+                "has_clear_catalyst": 0,
+                "buy_reason_length": 0,
+            }
+
+        classifier = NewsClassifier()
+        classified = classifier.classify_batch(news_list)
+
+        # Trouver la news avec le catalyseur le plus prioritaire
+        best = max(classified, key=lambda n: n.get("sentiment") or 0.0)
+        cat_type = best.get("catalyst_type", "UNKNOWN")
+
+        # Sentiment moyen des news
+        sentiments = [n.get("sentiment") or 0.0 for n in news_list]
+        avg_sentiment = sum(sentiments) / len(sentiments) if sentiments else 0.0
+
+        has_catalyst = 1 if cat_type not in ("TECHNICAL", "UNKNOWN") else 0
+
+        return {
+            "catalyst_type": cat_type,
+            "catalyst_confidence": 0.5 if has_catalyst else 0.0,
+            "news_sentiment": round(avg_sentiment, 4),
+            "has_clear_catalyst": has_catalyst,
+            "buy_reason_length": len(best.get("title", "")),
+        }
+
+    def _build_realtime_context_features(self, ticker: str, date: str) -> dict:
+        """Construit les features contexte pour le scoring temps reel.
+
+        Utilise l'historique des trades de Nicolas sur ce ticker.
+        """
+        all_trades = self.db.get_all_trades()
+        action_name = self.mapper.get_action_name(ticker)
+
+        previous = [
+            t for t in all_trades
+            if t["nom_action"] == action_name
+            and t["date_achat"][:10] < date
+            and t["statut"] == "CLOTURE"
+        ] if action_name else []
+
+        nb_previous = len(previous)
+        if nb_previous > 0:
+            wins = sum(1 for t in previous if t["rendement_brut_pct"] > 0)
+            win_rate = wins / nb_previous
+            last_trade_date = max(
+                t["date_vente"][:10] for t in previous if t["date_vente"]
+            )
+            last_dt = datetime.strptime(last_trade_date, "%Y-%m-%d")
+            current_dt = datetime.strptime(date, "%Y-%m-%d")
+            days_since = (current_dt - last_dt).days
+        else:
+            win_rate = 0.0
+            days_since = -1
+
+        day_of_week = datetime.strptime(date, "%Y-%m-%d").weekday()
+
+        return {
+            "day_of_week": day_of_week,
+            "nb_previous_trades": nb_previous,
+            "previous_win_rate": round(win_rate, 4),
+            "days_since_last_trade": days_since,
+        }
 
     def get_feature_names(self) -> list[str]:
         """Liste ordonnee des noms de features (sans target ni trade_id)."""

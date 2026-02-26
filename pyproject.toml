@@ -18,6 +18,9 @@ dependencies = [
     "joblib>=1.4.0",
     "numpy>=2.0.0",
     "openai>=1.0.0",
+    "apscheduler>=3.10.0",
+    "python-telegram-bot>=21.0",
+    "feedparser>=6.0.0",
 ]
 
 [dependency-groups]

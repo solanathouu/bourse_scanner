@@ -218,6 +218,74 @@ class TestBuildTradeFeatures:
         assert result["previous_win_rate"] == 1.0  # Le 1er trade etait gagnant
 
 
+class TestRealtimeFeatures:
+    """Tests pour build_realtime_features."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+        _seed_test_db(self.db)
+        self.engine = FeatureEngine(self.db)
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_returns_dict(self):
+        """build_realtime_features retourne un dict."""
+        result = self.engine.build_realtime_features("SAN.PA", 98.0, "2025-08-15")
+        assert isinstance(result, dict)
+
+    def test_has_technical_features(self):
+        """Le dict contient les features techniques."""
+        result = self.engine.build_realtime_features("SAN.PA", 98.0, "2025-08-15")
+        assert "rsi_14" in result
+        assert "bollinger_position" in result
+
+    def test_has_catalyst_features(self):
+        """Le dict contient les features catalyseur."""
+        result = self.engine.build_realtime_features("SAN.PA", 98.0, "2025-08-15")
+        assert "catalyst_type" in result
+        assert "news_sentiment" in result
+
+    def test_has_fundamental_features(self):
+        """Le dict contient les features fondamentales."""
+        result = self.engine.build_realtime_features("SAN.PA", 98.0, "2025-08-15")
+        assert "pe_ratio" in result
+        assert "analyst_count" in result
+
+    def test_has_context_features(self):
+        """Le dict contient les features contexte."""
+        result = self.engine.build_realtime_features("SAN.PA", 98.0, "2025-08-15")
+        assert "day_of_week" in result
+        assert "nb_previous_trades" in result
+
+    def test_no_target_column(self):
+        """Les features temps reel n'ont pas is_winner ni trade_id."""
+        result = self.engine.build_realtime_features("SAN.PA", 98.0, "2025-08-15")
+        assert "is_winner" not in result
+        assert "trade_id" not in result
+
+    def test_no_data_returns_none(self):
+        """Retourne None si pas assez de prix."""
+        result = self.engine.build_realtime_features("UNKNOWN.PA", 50.0, "2025-08-15")
+        assert result is None
+
+    def test_with_recent_news(self):
+        """Les news recentes alimentent les features catalyseur."""
+        # Ajouter une news recente
+        self.db.insert_news({
+            "ticker": "SAN.PA", "title": "Sanofi resultats record",
+            "source": "BFM", "url": "https://ex.com/new",
+            "published_at": "2025-08-14", "description": "CA en hausse",
+            "sentiment": 0.7, "source_api": "gnews",
+        })
+        result = self.engine.build_realtime_features("SAN.PA", 98.0, "2025-08-15")
+        assert result["has_clear_catalyst"] == 1
+        assert result["news_sentiment"] > 0
+
+
 class TestBuildAllFeatures:
     """Tests de construction de la matrice complete."""
 

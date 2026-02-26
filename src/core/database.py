@@ -153,6 +153,23 @@ class Database:
                 ON fundamentals(ticker, date);
         """)
 
+        # Table signals (etape 5 — signaux temps reel)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                score REAL NOT NULL,
+                catalyst_type TEXT,
+                catalyst_news_title TEXT,
+                features_json TEXT,
+                sent_at TEXT,
+                UNIQUE(ticker, date)
+            );
+            CREATE INDEX IF NOT EXISTS idx_signals_ticker_date
+                ON signals(ticker, date);
+        """)
+
         conn.close()
         logger.info(f"Base de données initialisée: {self.db_path}")
 
@@ -556,5 +573,57 @@ class Database:
         """Compte le nombre total de fondamentaux."""
         conn = self._connect()
         count = conn.execute("SELECT COUNT(*) FROM fundamentals").fetchone()[0]
+        conn.close()
+        return count
+
+    # --- Signals ---
+
+    def insert_signal(self, signal: dict):
+        """Insere un signal. Ignore les doublons (ticker+date)."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT OR IGNORE INTO signals
+                (ticker, date, score, catalyst_type,
+                 catalyst_news_title, features_json, sent_at)
+            VALUES
+                (:ticker, :date, :score, :catalyst_type,
+                 :catalyst_news_title, :features_json, :sent_at)
+        """, {
+            "catalyst_type": None, "catalyst_news_title": None,
+            "features_json": None, "sent_at": None,
+            **signal,
+        })
+        conn.commit()
+        conn.close()
+
+    def get_signals(self, ticker: str | None = None) -> list[dict]:
+        """Recupere les signaux, optionnellement filtres par ticker."""
+        conn = self._connect()
+        if ticker:
+            rows = conn.execute(
+                "SELECT * FROM signals WHERE ticker = ? ORDER BY date DESC",
+                (ticker,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM signals ORDER BY date DESC"
+            ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_latest_signal(self, ticker: str) -> dict | None:
+        """Recupere le signal le plus recent pour un ticker."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM signals WHERE ticker = ? ORDER BY date DESC LIMIT 1",
+            (ticker,),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def count_signals(self) -> int:
+        """Compte le nombre total de signaux."""
+        conn = self._connect()
+        count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
         conn.close()
         return count

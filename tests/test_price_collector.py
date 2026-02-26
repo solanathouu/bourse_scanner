@@ -89,6 +89,19 @@ class TestPriceCollector:
         assert ranges["SANOFI"]["start"] == "2025-05-16"
         assert ranges["SANOFI"]["end"] == "2025-07-10"
 
+    @patch("src.data_collection.price_collector.yf.download")
+    def test_collect_recent(self, mock_download):
+        """collect_recent calcule les dates et delegue a collect_for_ticker."""
+        mock_download.return_value = self._make_mock_df()
+
+        count = self.collector.collect_recent("SAN.PA", days=5)
+
+        assert count == 3
+        mock_download.assert_called_once()
+        call_args = mock_download.call_args
+        assert call_args[1]["start"] is not None
+        assert call_args[1]["end"] is not None
+
     def test_compute_date_ranges_trade_ouvert(self):
         """Un trade ouvert (sans date_vente) utilise la date du jour."""
         trades = [

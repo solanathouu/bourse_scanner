@@ -5,7 +5,7 @@ Bot Python de veille boursiere PEA. Analyse des donnees marche en temps reel, co
 ## Commandes
 
 ```bash
-uv run pytest tests/ -v          # Lancer tous les tests (222 tests)
+uv run pytest tests/ -v          # Lancer tous les tests (265 tests)
 uv run pytest tests/ -v -x       # Stopper au premier echec
 uv run python scripts/init_db.py       # Initialiser la base SQLite
 uv run python scripts/import_pdfs.py   # Importer les PDF dans la base
@@ -32,6 +32,9 @@ uv run python scripts/analyze_features.py --trade 42  # Features d'un trade spec
 uv run python scripts/analyze_trades_llm.py           # Analyser trades via GPT-4o-mini
 uv run python scripts/analyze_trades_llm.py --trade 42  # Analyser un trade specifique
 uv run python scripts/analyze_trades_llm.py --stats     # Stats des analyses LLM
+uv run python scripts/run_scanner.py           # Lancer le scanner (boucle infinie)
+uv run python scripts/run_scanner.py --once     # Scorer une fois et quitter
+uv run python scripts/run_scanner.py --dry-run  # Scorer sans envoyer de Telegram
 ```
 
 ## Architecture
@@ -43,8 +46,8 @@ pea-scanner/
 │   ├── extraction/             # Module 1: Extraction PDF -> SQLite
 │   ├── data_collection/        # Module 2: Collecte prix/news/fondamentaux (6 sources actives)
 │   ├── analysis/               # Module 3: LLMAnalyzer, LLMSentimentScorer, NewsClassifier, TechnicalIndicators, FeatureEngine, CatalystMatcher
-│   ├── model/                  # Module 4: Trainer (XGBoost), Evaluator
-│   └── alerts/                 # Module 5: Telegram (a venir)
+│   ├── model/                  # Module 4: Trainer (XGBoost), Evaluator, Predictor
+│   └── alerts/                 # Module 5: SignalFilter, AlertFormatter, TelegramBot
 ├── scripts/                    # Points d'entree CLI
 ├── tests/                      # Tests (miroir de src/)
 ├── config/                     # Fichiers de configuration YAML
@@ -88,15 +91,15 @@ core (fondation, 0 deps internes)
 | ML | xgboost, scikit-learn |
 | LLM | openai (GPT-4o-mini) |
 | Indicateurs techniques | ta (RSI, MACD, Bollinger, ATR) |
-| Scheduler | APScheduler |
-| Telegram | python-telegram-bot |
+| Scheduler | APScheduler 3.x |
+| Telegram | python-telegram-bot 22.x |
 | Logging | loguru |
 | Config | pyyaml + python-dotenv |
 | Tests | pytest |
 
 ## Base de donnees
 
-SQLite dans `data/trades.db`. Tables principales:
+SQLite dans `data/trades.db`. Tables principales (8 tables):
 
 - `executions` — Avis d'execution PDF parses (1 ligne = 1 PDF)
 - `trades_complets` — Trades reconstitues achat->vente (FIFO)
@@ -105,7 +108,7 @@ SQLite dans `data/trades.db`. Tables principales:
 - `prices` — Prix OHLCV collectes
 - `fundamentals` — Donnees fondamentales (PE, PB, consensus analystes, earnings date)
 - `news` — Actualites collectees (avec sentiment LLM)
-- `signals` — Signaux emis par le modele
+- `signals` — Signaux temps reel emis par le modele (ticker, date, score, catalyseur, sent_at)
 
 ## Etapes d'implementation
 
@@ -117,18 +120,18 @@ SQLite dans `data/trades.db`. Tables principales:
 | 4 | DONE | Feature engineering + ML — NewsClassifier, TechnicalIndicators, FeatureEngine, XGBoost Trainer, Evaluator |
 | 4bis | DONE | LLM Trade Analysis — GPT-4o-mini analyse 141 trades, remplace regex par analyse profonde |
 | 4ter | DONE | Enrichissement donnees — sentiment LLM, fondamentaux yfinance, Newsdata.io, RSS etendu, Boursorama delistes |
-| 5 | TODO | Pipeline temps reel + alertes Telegram |
+| 5 | DONE | Pipeline temps reel + alertes Telegram — Predictor, SignalFilter, TelegramBot, APScheduler, 30 valeurs |
 | 6 | TODO | Tests integration, stabilisation, deploiement VPS |
 
 ## Current Project State
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1+2+3+4+4bis+4ter DONE | pdf_parser, trade_matcher, database, 6 collectors, ticker_mapper, catalyst_matcher, news_classifier, technical_indicators, feature_engine, llm_analyzer, llm_sentiment, fundamental_collector, newsdata_collector, boursorama_scraper, trainer, evaluator, CLI |
-| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + OPENAI_API_KEY |
-| Tests | 222/222 PASS | database(30), pdf_parser(17), trade_matcher(7), ticker_mapper(9), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(18), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6) |
+| Code | Etape 1+2+3+4+4bis+4ter+5 DONE | pdf_parser, trade_matcher, database, 6 collectors, ticker_mapper, catalyst_matcher, news_classifier, technical_indicators, feature_engine, llm_analyzer, llm_sentiment, fundamental_collector, newsdata_collector, boursorama_scraper, trainer, evaluator, predictor, signal_filter, formatter, telegram_bot, run_scanner |
+| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + OPENAI_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
+| Tests | 265/265 PASS | database(35), pdf_parser(17), trade_matcher(7), ticker_mapper(11), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(26), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6), predictor(10), signal_filter(8), formatter(6), telegram_bot(4) |
 | Data | Collectee + LLM analysee + enrichie | 214 exec, 166 trades, 1357+ prix, 1824+ news, 649 catalyseurs, 141 analyses LLM, fondamentaux |
-| Docs | Design + plans Etapes 2-4ter | docs/plans/2026-02-22-etape*-*.md, 2026-02-23-etape4-*.md, 2026-02-24-etape4-llm-*.md |
+| Docs | Design + plans Etapes 2-5 | docs/plans/2026-02-22-etape*-*.md, 2026-02-23-etape4-*.md, 2026-02-24-etape4-llm-*.md |
 | Git | Pushe sur origin | 27+ commits, master a jour |
 
 ## Sources de donnees actives
@@ -184,20 +187,22 @@ L'etape 4 (Feature Engineering + ML) doit:
 
 ## Next Immediate Action
 
-**Etape 5: Pipeline temps reel + alertes Telegram.**
-
-Objectif: deployer le modele entraine pour scanner en temps reel la watchlist
-de 30 valeurs, calculer un score "Nicolas prendrait ce trade?", et envoyer
-des alertes Telegram quand le score depasse le seuil.
+**Etape 6: Tests integration, stabilisation, deploiement VPS.**
 
 Sous-etapes:
-1. **Predictor temps reel** — Charger le modele, calculer les features en direct
-2. **Signal filter** — Logique de filtrage intelligent (seuil, cooldown, dedup)
-3. **Telegram bot** — Envoi des alertes formatees
-4. **Scheduler** — APScheduler pour la boucle de collecte + scoring
-5. **Configuration** — Watchlist 30 valeurs, seuils, intervalles
+1. **Collecter donnees initiales** pour les 13 nouveaux tickers (prix, news, fondamentaux)
+2. **Creer le bot Telegram** (voir instructions ci-dessous)
+3. **Tester end-to-end** avec `uv run python scripts/run_scanner.py --once --dry-run`
+4. **Deployer sur VPS** dans tmux
+5. **Monitorer** les premiers jours
 
-**Watchlist 30 valeurs** fournie (screenshots data/).
+### Creer le bot Telegram
+1. Ouvrir Telegram, chercher `@BotFather`, envoyer `/newbot`
+2. Donner un nom ("PEA Scanner Bot") puis un username
+3. Copier le **token** fourni par BotFather
+4. Creer un **groupe Telegram** et y ajouter les 2 comptes + le bot
+5. Envoyer un message dans le groupe, puis `https://api.telegram.org/bot<TOKEN>/getUpdates` pour trouver le **chat_id**
+6. Mettre dans `.env` : `TELEGRAM_BOT_TOKEN=xxx` et `TELEGRAM_CHAT_ID=xxx`
 
 ## Donnees cles du trading
 

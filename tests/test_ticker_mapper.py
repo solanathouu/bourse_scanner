@@ -38,7 +38,7 @@ class TestTickerMapper:
         """Retourne tous les mappings connus."""
         mappings = self.mapper.get_all_mappings()
         assert isinstance(mappings, dict)
-        assert len(mappings) >= 19
+        assert len(mappings) >= 33
 
     def test_get_ticker_for_all_traded_actions(self):
         """Verifie que toutes les actions tradees ont un mapping."""
@@ -53,3 +53,29 @@ class TestTickerMapper:
         for name in traded:
             ticker = self.mapper.get_ticker(name)
             assert ticker.endswith(".PA"), f"{name} -> {ticker} ne finit pas par .PA"
+
+    def test_mapping_nouveaux_tickers_watchlist(self):
+        """Verifie les 13 nouveaux tickers de la watchlist etape 5."""
+        nouveaux = {
+            "AVENIR TELECOM": "AVT.PA",
+            "BIOSYNEX": "ALBIO.PA",
+            "CAPITAL B.": "ALCAP.PA",
+            "CROSSJECT": "ALCJ.PA",
+            "MEDIAN TECHNOLOG.": "ALMDT.PA",
+            "POXEL": "POXEL.PA",
+            "REXEL": "RXL.PA",
+            "SENSORION": "ALSEN.PA",
+            "SOITEC": "SOI.PA",
+            "UBISOFT": "UBI.PA",
+            "VALBIOTIS": "ALVAL.PA",
+            "VINCI": "DG.PA",
+            "WORLDLINE": "WLN.PA",
+        }
+        for name, expected_ticker in nouveaux.items():
+            assert self.mapper.get_ticker(name) == expected_ticker
+
+    def test_get_action_name(self):
+        """Reverse lookup ticker -> nom d'action."""
+        assert self.mapper.get_action_name("SAN.PA") == "SANOFI"
+        assert self.mapper.get_action_name("DG.PA") == "VINCI"
+        assert self.mapper.get_action_name("UNKNOWN.PA") is None

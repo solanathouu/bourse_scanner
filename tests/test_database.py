@@ -535,6 +535,69 @@ class TestFundamentalsTable:
         assert self.db.count_fundamentals() == 1
 
 
+class TestSignalsTable:
+    """Tests pour la table signals."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_and_get_signal(self):
+        """Insere un signal et le recupere."""
+        signal = {
+            "ticker": "SAN.PA", "date": "2026-02-26",
+            "score": 0.82, "catalyst_type": "EARNINGS",
+            "catalyst_news_title": "Sanofi: resultats T2",
+            "features_json": '{"rsi_14": 38.2}',
+            "sent_at": "2026-02-26 10:00:00",
+        }
+        self.db.insert_signal(signal)
+        result = self.db.get_signals("SAN.PA")
+        assert len(result) == 1
+        assert result[0]["score"] == 0.82
+        assert result[0]["catalyst_type"] == "EARNINGS"
+
+    def test_get_latest_signal(self):
+        """Recupere le signal le plus recent pour un ticker."""
+        self.db.insert_signal({
+            "ticker": "SAN.PA", "date": "2026-02-25",
+            "score": 0.70,
+        })
+        self.db.insert_signal({
+            "ticker": "SAN.PA", "date": "2026-02-26",
+            "score": 0.85,
+        })
+        latest = self.db.get_latest_signal("SAN.PA")
+        assert latest is not None
+        assert latest["date"] == "2026-02-26"
+        assert latest["score"] == 0.85
+
+    def test_get_latest_signal_none(self):
+        """Retourne None si aucun signal pour ce ticker."""
+        result = self.db.get_latest_signal("UNKNOWN.PA")
+        assert result is None
+
+    def test_count_signals(self):
+        """Compte les signaux."""
+        assert self.db.count_signals() == 0
+        self.db.insert_signal({
+            "ticker": "SAN.PA", "date": "2026-02-26", "score": 0.80,
+        })
+        assert self.db.count_signals() == 1
+
+    def test_insert_signal_doublon_ignore(self):
+        """Un doublon (meme ticker+date) est ignore."""
+        signal = {"ticker": "SAN.PA", "date": "2026-02-26", "score": 0.80}
+        self.db.insert_signal(signal)
+        self.db.insert_signal(signal)
+        assert self.db.count_signals() == 1
+
+
 class TestTradeAnalysesLLM:
     """Tests CRUD pour la table trade_analyses_llm."""
 
