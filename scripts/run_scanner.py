@@ -13,6 +13,7 @@ import argparse
 import os
 import sys
 import signal as sig
+from datetime import datetime, timedelta
 
 import yaml
 from dotenv import load_dotenv
@@ -86,6 +87,89 @@ def refresh_fundamentals(db: Database, watchlist: list[dict]):
     logger.info(f"Refresh fondamentaux: {len(tickers)} tickers")
 
 
+def run_daily_review(db, config, telegram, dry_run):
+    """Review des signaux J+3 et envoi recap Telegram."""
+    from src.feedback.signal_reviewer import SignalReviewer
+    from src.feedback.performance_tracker import PerformanceTracker
+
+    feedback_cfg = config.get("feedback", {})
+    reviewer = SignalReviewer(db, win_threshold=feedback_cfg.get("win_threshold", 4.5))
+    reviews = reviewer.review_pending()
+
+    if reviews and telegram and not dry_run:
+        base_threshold = config.get("scoring", {}).get("threshold", 0.75)
+        tracker = PerformanceTracker(db, base_threshold=base_threshold)
+        summary = tracker.get_daily_summary(reviews)
+        telegram.send_alert_sync(summary)
+
+    logger.info(f"Review quotidienne: {len(reviews)} signaux reviewes")
+
+
+def update_filter_rules(db, config):
+    """Mise a jour des regles de filtrage adaptatives."""
+    import json as _json
+    from src.feedback.performance_tracker import PerformanceTracker
+
+    base_threshold = config.get("scoring", {}).get("threshold", 0.75)
+    tracker = PerformanceTracker(db, base_threshold=base_threshold)
+    rules = tracker.generate_filter_rules()
+
+    threshold = tracker.compute_adaptive_threshold()
+    if threshold != base_threshold:
+        db.insert_filter_rule({
+            "rule_type": "ADAPTIVE_THRESHOLD",
+            "rule_json": _json.dumps({"threshold": threshold}),
+            "win_rate": None, "sample_size": None,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "active": 1,
+        })
+
+    logger.info(f"Regles mises a jour: {len(rules)} regles, seuil={threshold:.2f}")
+
+
+def check_retrain(db, config, telegram, dry_run):
+    """Verifie si re-entrainement necessaire et execute."""
+    from src.feedback.model_retrainer import ModelRetrainer
+
+    feedback_cfg = config.get("feedback", {})
+    model_path = config.get("scoring", {}).get("model_path", "data/models/nicolas_v1.joblib")
+
+    retrainer = ModelRetrainer(
+        db, min_reviews_for_retrain=feedback_cfg.get("min_reviews_retrain", 50)
+    )
+
+    if not retrainer.should_retrain():
+        logger.info("Pas assez de reviews pour re-entrainer")
+        return
+
+    result = retrainer.retrain_with_validation(model_path)
+    report = retrainer.format_retrain_report(result)
+
+    if telegram and not dry_run:
+        telegram.send_alert_sync(report)
+
+    logger.info(f"Re-entrainement: deployed={result['deployed']}")
+
+
+def send_weekly_summary(db, config, telegram, dry_run):
+    """Envoi du resume hebdomadaire."""
+    from src.feedback.performance_tracker import PerformanceTracker
+
+    base_threshold = config.get("scoring", {}).get("threshold", 0.75)
+    tracker = PerformanceTracker(db, base_threshold=base_threshold)
+
+    today = datetime.now()
+    week_start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+    week_end = today.strftime("%Y-%m-%d")
+
+    summary = tracker.get_weekly_summary(week_start, week_end)
+
+    if telegram and not dry_run:
+        telegram.send_alert_sync(summary)
+
+    logger.info("Resume hebdomadaire envoye")
+
+
 def score_and_alert(predictor: Predictor, signal_filter: SignalFilter,
                     formatter: AlertFormatter, telegram: TelegramBot | None,
                     watchlist: list[dict], dry_run: bool = False):
@@ -148,6 +232,22 @@ def run_once(dry_run: bool = False):
 
     # Predictor
     model_path = scoring_config.get("model_path", "data/models/nicolas_v1.joblib")
+
+    # Register current model if not in DB
+    if db.get_active_model_version() is None:
+        db.insert_model_version({
+            "version": "v1",
+            "file_path": model_path,
+            "trained_at": "2026-02-20 00:00:00",
+            "training_signals": 0,
+            "accuracy": 0.0,
+            "precision_score": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "is_active": 1,
+            "notes": "Initial model from historical trades",
+        })
+
     try:
         predictor = Predictor(db, model_path=model_path)
     except Exception as e:
@@ -197,12 +297,29 @@ def run_scheduler(dry_run: bool = False):
     scoring_config = config.get("scoring", {})
     sched_config = config.get("scheduler", {})
     market_config = config.get("market_hours", {})
+    feedback_config = config.get("feedback", {})
 
     db = Database(DB_PATH)
     db.init_db()
 
     # Predictor
     model_path = scoring_config.get("model_path", "data/models/nicolas_v1.joblib")
+
+    # Register current model if not in DB
+    if db.get_active_model_version() is None:
+        db.insert_model_version({
+            "version": "v1",
+            "file_path": model_path,
+            "trained_at": "2026-02-20 00:00:00",
+            "training_signals": 0,
+            "accuracy": 0.0,
+            "precision_score": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "is_active": 1,
+            "notes": "Initial model from historical trades",
+        })
+
     try:
         predictor = Predictor(db, model_path=model_path)
     except Exception as e:
@@ -274,6 +391,58 @@ def run_scheduler(dry_run: bool = False):
         name="Refresh fondamentaux",
     )
 
+    # Job 5: Review J+3 — quotidien a 18h (lun-ven)
+    scheduler.add_job(
+        run_daily_review,
+        CronTrigger(
+            hour=feedback_config.get("review_hour", 18),
+            minute=0,
+            day_of_week="mon-fri",
+        ),
+        args=[db, config, telegram, dry_run],
+        id="daily_review",
+        name="Review J+3",
+    )
+
+    # Job 6: Update regles — quotidien a 18h30 (lun-ven)
+    scheduler.add_job(
+        update_filter_rules,
+        CronTrigger(
+            hour=feedback_config.get("rules_update_hour", 18),
+            minute=30,
+            day_of_week="mon-fri",
+        ),
+        args=[db, config],
+        id="update_rules",
+        name="Update regles",
+    )
+
+    # Job 7: Check retrain — dimanche 19h
+    scheduler.add_job(
+        check_retrain,
+        CronTrigger(
+            hour=feedback_config.get("retrain_hour", 19),
+            minute=0,
+            day_of_week=feedback_config.get("retrain_day", "sun"),
+        ),
+        args=[db, config, telegram, dry_run],
+        id="check_retrain",
+        name="Check retrain",
+    )
+
+    # Job 8: Resume hebdo — dimanche 20h
+    scheduler.add_job(
+        send_weekly_summary,
+        CronTrigger(
+            hour=feedback_config.get("weekly_hour", 20),
+            minute=0,
+            day_of_week=feedback_config.get("weekly_day", "sun"),
+        ),
+        args=[db, config, telegram, dry_run],
+        id="weekly_summary",
+        name="Resume hebdomadaire",
+    )
+
     # Graceful shutdown
     def shutdown(signum, frame):
         logger.info("Arret du scanner...")
@@ -295,6 +464,10 @@ def run_scheduler(dry_run: bool = False):
     print(f"  - News: toutes les {sched_config.get('news_interval_min', 10)} min")
     print(f"  - Scoring: toutes les {sched_config.get('scoring_interval_min', 60)} min")
     print(f"  - Fondamentaux: quotidien a {sched_config.get('fundamentals_hour', 7)}h")
+    print(f"  - Review J+3: quotidien a {feedback_config.get('review_hour', 18)}h")
+    print(f"  - Update regles: quotidien a {feedback_config.get('rules_update_hour', 18)}h30")
+    print(f"  - Check retrain: {feedback_config.get('retrain_day', 'dim')} a {feedback_config.get('retrain_hour', 19)}h")
+    print(f"  - Resume hebdo: {feedback_config.get('weekly_day', 'dim')} a {feedback_config.get('weekly_hour', 20)}h")
     print(f"\nCtrl+C pour arreter\n")
 
     scheduler.start()

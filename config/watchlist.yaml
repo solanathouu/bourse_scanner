@@ -114,3 +114,14 @@ market_hours:
   scoring_open: "09:30"
   scoring_close: "17:30"
   timezone: "Europe/Paris"
+
+# Feedback loop
+feedback:
+  review_hour: 18          # Review J+3 a 18h
+  rules_update_hour: 18    # Mise a jour regles a 18h30
+  weekly_day: "sun"         # Resume hebdo le dimanche
+  weekly_hour: 20           # A 20h
+  retrain_day: "sun"        # Check retrain le dimanche
+  retrain_hour: 19          # A 19h
+  win_threshold: 4.5        # % pour considerer un WIN
+  min_reviews_retrain: 50   # Reviews minimum pour retrain
