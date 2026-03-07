@@ -2,8 +2,10 @@
 
 Applique un seuil de score, un cooldown par ticker, et
 verifie que le marche est ouvert (horaires Paris).
+Supporte le filtrage adaptatif via regles dynamiques en BDD.
 """
 
+import json
 from datetime import datetime, timedelta
 
 import pytz
@@ -28,21 +30,66 @@ class SignalFilter:
     def filter_signals(self, signals: list[dict]) -> list[dict]:
         """Filtre une liste de signaux et retourne ceux a envoyer.
 
-        Applique dans l'ordre: seuil de score, cooldown ticker, horaires.
+        Applique dans l'ordre: regles adaptatives, seuil de score,
+        cooldown ticker, limite par jour.
         """
+        rules = self.db.get_active_filter_rules()
+        exclude_catalysts = self._get_excluded_catalysts(rules)
+        max_per_day = self._get_max_per_day(rules)
+        adaptive_threshold = self._get_adaptive_threshold(rules)
+        effective_threshold = adaptive_threshold if adaptive_threshold is not None else self.threshold
+
         filtered = []
         for signal in signals:
-            if not self._passes_threshold(signal):
+            if signal.get("catalyst_type") in exclude_catalysts:
+                logger.debug(
+                    f"Signal {signal['ticker']} exclu: "
+                    f"catalyst {signal.get('catalyst_type')}"
+                )
+                continue
+            if signal.get("score", 0) < effective_threshold:
+                logger.debug(
+                    f"Signal {signal['ticker']} rejete: "
+                    f"score {signal.get('score', 0):.2f} < {effective_threshold}"
+                )
                 continue
             if not self._passes_cooldown(signal):
                 continue
             filtered.append(signal)
 
+        if max_per_day is not None and len(filtered) > max_per_day:
+            filtered = filtered[:max_per_day]
+
         logger.info(
-            f"SignalFilter: {len(filtered)}/{len(signals)} signaux retenus "
-            f"(seuil={self.threshold})"
+            f"SignalFilter: {len(filtered)}/{len(signals)} retenus "
+            f"(seuil={effective_threshold})"
         )
         return filtered
+
+    def _get_excluded_catalysts(self, rules: list[dict]) -> set[str]:
+        """Extract excluded catalyst types from EXCLUDE_CATALYST rules."""
+        excluded = set()
+        for rule in rules:
+            if rule["rule_type"] == "EXCLUDE_CATALYST":
+                data = json.loads(rule["rule_json"])
+                excluded.add(data["catalyst_type"])
+        return excluded
+
+    def _get_max_per_day(self, rules: list[dict]) -> int | None:
+        """Extract max signals per day from MAX_SIGNALS_PER_DAY rule."""
+        for rule in rules:
+            if rule["rule_type"] == "MAX_SIGNALS_PER_DAY":
+                data = json.loads(rule["rule_json"])
+                return data.get("max")
+        return None
+
+    def _get_adaptive_threshold(self, rules: list[dict]) -> float | None:
+        """Extract adaptive threshold from ADAPTIVE_THRESHOLD rule."""
+        for rule in rules:
+            if rule["rule_type"] == "ADAPTIVE_THRESHOLD":
+                data = json.loads(rule["rule_json"])
+                return data.get("threshold")
+        return None
 
     def _passes_threshold(self, signal: dict) -> bool:
         """Verifie que le score depasse le seuil."""
@@ -105,6 +152,7 @@ class SignalFilter:
             "ticker": signal["ticker"],
             "date": signal["date"],
             "score": signal["score"],
+            "signal_price": signal.get("current_price"),
             "catalyst_type": signal.get("catalyst_type"),
             "catalyst_news_title": signal.get("catalyst_news_title"),
             "features_json": signal.get("features_json"),

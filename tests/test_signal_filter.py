@@ -96,3 +96,86 @@ class TestSignalFilter:
         # mais on verifie que ca ne plante pas
         result = self.filter.is_market_hours()
         assert isinstance(result, bool)
+
+
+class TestAdaptiveFiltering:
+    """Tests du filtrage adaptatif avec regles dynamiques."""
+
+    def setup_method(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(os.path.join(self.tmp.name, "test.db"))
+        self.db.init_db()
+        self.config = {"threshold": 0.75, "cooldown_hours": 24}
+        self.sf = SignalFilter(self.db, self.config)
+
+    def teardown_method(self):
+        self.tmp.cleanup()
+
+    def test_exclude_catalyst_rule(self):
+        """Les signaux avec catalyst exclu sont filtres."""
+        self.db.insert_filter_rule({
+            "rule_type": "EXCLUDE_CATALYST",
+            "rule_json": '{"catalyst_type": "TECHNICAL"}',
+            "win_rate": 0.20, "sample_size": 10,
+            "created_at": "2026-03-07", "active": 1,
+        })
+        signals = [
+            {"ticker": "SAN.PA", "score": 0.85, "catalyst_type": "EARNINGS"},
+            {"ticker": "DBV.PA", "score": 0.82, "catalyst_type": "TECHNICAL"},
+        ]
+        filtered = self.sf.filter_signals(signals)
+        assert len(filtered) == 1
+        assert filtered[0]["ticker"] == "SAN.PA"
+
+    def test_max_signals_per_day(self):
+        """La limite par jour tronque les signaux excedentaires."""
+        self.db.insert_filter_rule({
+            "rule_type": "MAX_SIGNALS_PER_DAY",
+            "rule_json": '{"max": 2}',
+            "win_rate": None, "sample_size": None,
+            "created_at": "2026-03-07", "active": 1,
+        })
+        signals = [
+            {"ticker": "SAN.PA", "score": 0.90, "catalyst_type": "EARNINGS"},
+            {"ticker": "DBV.PA", "score": 0.88, "catalyst_type": "UPGRADE"},
+            {"ticker": "MAU.PA", "score": 0.85, "catalyst_type": "EARNINGS"},
+        ]
+        filtered = self.sf.filter_signals(signals)
+        assert len(filtered) == 2
+
+    def test_adaptive_threshold(self):
+        """Le seuil adaptatif remplace le seuil par defaut."""
+        self.db.insert_filter_rule({
+            "rule_type": "ADAPTIVE_THRESHOLD",
+            "rule_json": '{"threshold": 0.85}',
+            "win_rate": None, "sample_size": None,
+            "created_at": "2026-03-07", "active": 1,
+        })
+        signals = [
+            {"ticker": "SAN.PA", "score": 0.90, "catalyst_type": "EARNINGS"},
+            {"ticker": "DBV.PA", "score": 0.82, "catalyst_type": "UPGRADE"},
+        ]
+        filtered = self.sf.filter_signals(signals)
+        assert len(filtered) == 1
+        assert filtered[0]["ticker"] == "SAN.PA"
+
+    def test_no_rules_uses_default_threshold(self):
+        """Sans regles adaptatives, le seuil par defaut est utilise."""
+        signals = [
+            {"ticker": "SAN.PA", "score": 0.80, "catalyst_type": "EARNINGS"},
+            {"ticker": "DBV.PA", "score": 0.70, "catalyst_type": "UPGRADE"},
+        ]
+        filtered = self.sf.filter_signals(signals)
+        assert len(filtered) == 1
+        assert filtered[0]["ticker"] == "SAN.PA"
+
+    def test_record_signal_stores_price(self):
+        """record_signal enregistre le signal_price en BDD."""
+        signal = {
+            "ticker": "SAN.PA", "date": "2026-03-07",
+            "score": 0.85, "current_price": 95.50,
+            "catalyst_type": "EARNINGS", "features_json": "{}",
+        }
+        self.sf.record_signal(signal)
+        stored = self.db.get_latest_signal("SAN.PA")
+        assert stored["signal_price"] == 95.50
