@@ -25,6 +25,9 @@ def test_database_creates_tables():
 
         assert "executions" in tables
         assert "trades_complets" in tables
+        assert "signal_reviews" in tables
+        assert "filter_rules" in tables
+        assert "model_versions" in tables
 
 
 def test_database_insert_execution():
@@ -596,6 +599,356 @@ class TestSignalsTable:
         self.db.insert_signal(signal)
         self.db.insert_signal(signal)
         assert self.db.count_signals() == 1
+
+
+class TestSignalPriceMigration:
+    """Tests pour la migration signal_price sur la table signals."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_signal_price_column_exists(self):
+        """La colonne signal_price existe apres init_db."""
+        conn = sqlite3.connect(self.db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()]
+        conn.close()
+        assert "signal_price" in columns
+
+    def test_insert_signal_with_price(self):
+        """Insere un signal avec signal_price."""
+        self.db.insert_signal({
+            "ticker": "SAN.PA", "date": "2026-03-01",
+            "score": 0.85, "signal_price": 96.50,
+        })
+        result = self.db.get_signals("SAN.PA")
+        assert len(result) == 1
+        assert result[0]["signal_price"] == 96.50
+
+    def test_insert_signal_without_price(self):
+        """Insere un signal sans signal_price (default None)."""
+        self.db.insert_signal({
+            "ticker": "SAN.PA", "date": "2026-03-01", "score": 0.80,
+        })
+        result = self.db.get_signals("SAN.PA")
+        assert result[0]["signal_price"] is None
+
+
+class TestSignalReviews:
+    """Tests CRUD pour la table signal_reviews."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+        # Insert signals to reference
+        self.db.insert_signal({
+            "ticker": "SAN.PA", "date": "2026-02-26",
+            "score": 0.82, "signal_price": 96.50,
+            "sent_at": "2026-02-26 10:00:00",
+        })
+        self.db.insert_signal({
+            "ticker": "MC.PA", "date": "2026-02-25",
+            "score": 0.78, "signal_price": 850.0,
+            "sent_at": "2026-02-25 11:00:00",
+        })
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_and_get_review(self):
+        """Insere et recupere une review."""
+        review = {
+            "signal_id": 1, "ticker": "SAN.PA",
+            "signal_date": "2026-02-26", "signal_price": 96.50,
+            "review_date": "2026-03-01", "review_price": 100.0,
+            "performance_pct": 3.63, "outcome": "WIN",
+            "failure_reason": None, "catalyst_type": "EARNINGS",
+            "features_json": '{"rsi_14": 38.2}',
+            "reviewed_at": "2026-03-01 18:00:00",
+        }
+        self.db.insert_signal_review(review)
+        result = self.db.get_signal_reviews()
+        assert len(result) == 1
+        assert result[0]["ticker"] == "SAN.PA"
+        assert result[0]["performance_pct"] == 3.63
+        assert result[0]["outcome"] == "WIN"
+
+    def test_insert_review_doublon_ignore(self):
+        """Un doublon (meme signal_id) est ignore."""
+        review = {
+            "signal_id": 1, "ticker": "SAN.PA",
+            "signal_date": "2026-02-26", "signal_price": 96.50,
+            "review_date": "2026-03-01", "review_price": 100.0,
+            "performance_pct": 3.63, "outcome": "WIN",
+            "failure_reason": None, "catalyst_type": "EARNINGS",
+            "features_json": None, "reviewed_at": "2026-03-01 18:00:00",
+        }
+        self.db.insert_signal_review(review)
+        self.db.insert_signal_review(review)
+        result = self.db.get_signal_reviews()
+        assert len(result) == 1
+
+    def test_get_reviews_by_ticker(self):
+        """Filtre les reviews par ticker."""
+        self.db.insert_signal_review({
+            "signal_id": 1, "ticker": "SAN.PA",
+            "signal_date": "2026-02-26", "signal_price": 96.50,
+            "review_date": "2026-03-01", "review_price": 100.0,
+            "performance_pct": 3.63, "outcome": "WIN",
+            "failure_reason": None, "catalyst_type": None,
+            "features_json": None, "reviewed_at": "2026-03-01 18:00:00",
+        })
+        self.db.insert_signal_review({
+            "signal_id": 2, "ticker": "MC.PA",
+            "signal_date": "2026-02-25", "signal_price": 850.0,
+            "review_date": "2026-02-28", "review_price": 840.0,
+            "performance_pct": -1.18, "outcome": "LOSS",
+            "failure_reason": "market_downturn", "catalyst_type": None,
+            "features_json": None, "reviewed_at": "2026-02-28 18:00:00",
+        })
+        san = self.db.get_signal_reviews("SAN.PA")
+        assert len(san) == 1
+        assert san[0]["ticker"] == "SAN.PA"
+        all_reviews = self.db.get_signal_reviews()
+        assert len(all_reviews) == 2
+
+    def test_get_pending_signal_reviews(self):
+        """Recupere les signaux envoyes il y a 3+ jours sans review."""
+        pending = self.db.get_pending_signal_reviews("2026-03-01")
+        # signal du 2026-02-26 (5 jours ago) + signal du 2026-02-25 (4 jours ago)
+        assert len(pending) == 2
+        # Trop tot: seulement 1 jour apres
+        pending_early = self.db.get_pending_signal_reviews("2026-02-27")
+        assert len(pending_early) == 0
+
+    def test_get_pending_excludes_reviewed(self):
+        """Les signaux deja reviewes ne sont pas dans pending."""
+        self.db.insert_signal_review({
+            "signal_id": 1, "ticker": "SAN.PA",
+            "signal_date": "2026-02-26", "signal_price": 96.50,
+            "review_date": "2026-03-01", "review_price": 100.0,
+            "performance_pct": 3.63, "outcome": "WIN",
+            "failure_reason": None, "catalyst_type": None,
+            "features_json": None, "reviewed_at": "2026-03-01 18:00:00",
+        })
+        pending = self.db.get_pending_signal_reviews("2026-03-01")
+        assert len(pending) == 1  # only MC.PA signal left
+        assert pending[0]["ticker"] == "MC.PA"
+
+    def test_get_reviews_in_period(self):
+        """Recupere les reviews dans une periode donnee."""
+        self.db.insert_signal_review({
+            "signal_id": 1, "ticker": "SAN.PA",
+            "signal_date": "2026-02-26", "signal_price": 96.50,
+            "review_date": "2026-03-01", "review_price": 100.0,
+            "performance_pct": 3.63, "outcome": "WIN",
+            "failure_reason": None, "catalyst_type": None,
+            "features_json": None, "reviewed_at": "2026-03-01 18:00:00",
+        })
+        result = self.db.get_reviews_in_period("2026-02-20", "2026-02-28")
+        assert len(result) == 1
+        result_empty = self.db.get_reviews_in_period("2026-03-01", "2026-03-10")
+        assert len(result_empty) == 0
+
+    def test_get_review_stats(self):
+        """Retourne les stats des reviews."""
+        self.db.insert_signal_review({
+            "signal_id": 1, "ticker": "SAN.PA",
+            "signal_date": "2026-02-26", "signal_price": 96.50,
+            "review_date": "2026-03-01", "review_price": 100.0,
+            "performance_pct": 3.63, "outcome": "WIN",
+            "failure_reason": None, "catalyst_type": None,
+            "features_json": None, "reviewed_at": "2026-03-01 18:00:00",
+        })
+        self.db.insert_signal_review({
+            "signal_id": 2, "ticker": "MC.PA",
+            "signal_date": "2026-02-25", "signal_price": 850.0,
+            "review_date": "2026-02-28", "review_price": 840.0,
+            "performance_pct": -1.18, "outcome": "LOSS",
+            "failure_reason": "market_downturn", "catalyst_type": None,
+            "features_json": None, "reviewed_at": "2026-02-28 18:00:00",
+        })
+        stats = self.db.get_review_stats()
+        assert stats["total"] == 2
+        assert stats["wins"] == 1
+        assert stats["losses"] == 1
+        assert stats["neutrals"] == 0
+
+    def test_get_review_stats_empty(self):
+        """Stats vides quand aucune review."""
+        stats = self.db.get_review_stats()
+        assert stats == {"total": 0, "wins": 0, "losses": 0, "neutrals": 0}
+
+
+class TestFilterRules:
+    """Tests CRUD pour la table filter_rules."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_and_get_rule(self):
+        """Insere et recupere une regle de filtrage."""
+        rule = {
+            "rule_type": "exclude_catalyst",
+            "rule_json": '{"catalyst_type": "UNKNOWN", "min_samples": 5}',
+            "win_rate": 0.30,
+            "sample_size": 10,
+            "created_at": "2026-03-01 18:00:00",
+            "active": 1,
+        }
+        self.db.insert_filter_rule(rule)
+        result = self.db.get_active_filter_rules()
+        assert len(result) == 1
+        assert result[0]["rule_type"] == "exclude_catalyst"
+        assert result[0]["win_rate"] == 0.30
+
+    def test_deactivate_rule(self):
+        """Desactive une regle de filtrage."""
+        self.db.insert_filter_rule({
+            "rule_type": "exclude_catalyst",
+            "rule_json": '{"catalyst_type": "UNKNOWN"}',
+            "created_at": "2026-03-01 18:00:00",
+        })
+        rules = self.db.get_active_filter_rules()
+        assert len(rules) == 1
+        self.db.deactivate_filter_rule(rules[0]["id"])
+        rules = self.db.get_active_filter_rules()
+        assert len(rules) == 0
+
+    def test_multiple_rules_active_filter(self):
+        """Seules les regles actives sont retournees."""
+        self.db.insert_filter_rule({
+            "rule_type": "exclude_catalyst",
+            "rule_json": '{"catalyst_type": "UNKNOWN"}',
+            "created_at": "2026-03-01 18:00:00",
+        })
+        self.db.insert_filter_rule({
+            "rule_type": "min_score",
+            "rule_json": '{"min_score": 0.80}',
+            "created_at": "2026-03-01 18:00:00",
+            "active": 0,  # inactive
+        })
+        active = self.db.get_active_filter_rules()
+        assert len(active) == 1
+        assert active[0]["rule_type"] == "exclude_catalyst"
+
+    def test_insert_rule_defaults(self):
+        """Les valeurs par defaut (win_rate, sample_size, active) fonctionnent."""
+        self.db.insert_filter_rule({
+            "rule_type": "test",
+            "rule_json": "{}",
+            "created_at": "2026-03-01 18:00:00",
+        })
+        result = self.db.get_active_filter_rules()
+        assert result[0]["win_rate"] is None
+        assert result[0]["sample_size"] is None
+        assert result[0]["active"] == 1
+
+
+class TestModelVersions:
+    """Tests CRUD pour la table model_versions."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_and_get_version(self):
+        """Insere et recupere une version de modele."""
+        version = {
+            "version": "v2.0", "file_path": "data/models/nicolas_v2.joblib",
+            "trained_at": "2026-03-01 18:00:00", "training_signals": 50,
+            "accuracy": 0.85, "precision_score": 0.82, "recall": 0.90,
+            "f1": 0.86, "is_active": 1, "notes": "Retrained with feedback",
+        }
+        self.db.insert_model_version(version)
+        result = self.db.get_all_model_versions()
+        assert len(result) == 1
+        assert result[0]["version"] == "v2.0"
+        assert result[0]["accuracy"] == 0.85
+        assert result[0]["is_active"] == 1
+
+    def test_get_active_model_version(self):
+        """Recupere la version active."""
+        self.db.insert_model_version({
+            "version": "v1.0", "file_path": "data/models/v1.joblib",
+            "trained_at": "2026-02-01 18:00:00", "is_active": 0,
+        })
+        self.db.insert_model_version({
+            "version": "v2.0", "file_path": "data/models/v2.joblib",
+            "trained_at": "2026-03-01 18:00:00", "is_active": 1,
+        })
+        active = self.db.get_active_model_version()
+        assert active is not None
+        assert active["version"] == "v2.0"
+
+    def test_get_active_model_version_none(self):
+        """Retourne None si aucun modele actif."""
+        result = self.db.get_active_model_version()
+        assert result is None
+
+    def test_set_active_model(self):
+        """Active un modele et desactive les autres."""
+        self.db.insert_model_version({
+            "version": "v1.0", "file_path": "data/models/v1.joblib",
+            "trained_at": "2026-02-01 18:00:00", "is_active": 1,
+        })
+        self.db.insert_model_version({
+            "version": "v2.0", "file_path": "data/models/v2.joblib",
+            "trained_at": "2026-03-01 18:00:00", "is_active": 0,
+        })
+        # Activate v2
+        self.db.set_active_model(2)
+        active = self.db.get_active_model_version()
+        assert active["version"] == "v2.0"
+        # v1 should be inactive now
+        all_versions = self.db.get_all_model_versions()
+        assert all_versions[0]["is_active"] == 0
+        assert all_versions[1]["is_active"] == 1
+
+    def test_get_all_model_versions_ordered(self):
+        """Recupere toutes les versions triees par id."""
+        self.db.insert_model_version({
+            "version": "v1.0", "file_path": "v1.joblib",
+            "trained_at": "2026-02-01",
+        })
+        self.db.insert_model_version({
+            "version": "v2.0", "file_path": "v2.joblib",
+            "trained_at": "2026-03-01",
+        })
+        result = self.db.get_all_model_versions()
+        assert len(result) == 2
+        assert result[0]["version"] == "v1.0"
+        assert result[1]["version"] == "v2.0"
+
+    def test_insert_version_defaults(self):
+        """Les valeurs par defaut fonctionnent correctement."""
+        self.db.insert_model_version({
+            "version": "v1.0", "file_path": "v1.joblib",
+            "trained_at": "2026-02-01",
+        })
+        result = self.db.get_all_model_versions()
+        assert result[0]["training_signals"] == 0
+        assert result[0]["accuracy"] is None
+        assert result[0]["is_active"] == 0
+        assert result[0]["notes"] is None
 
 
 class TestTradeAnalysesLLM:

@@ -169,6 +169,62 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_signals_ticker_date
                 ON signals(ticker, date);
         """)
+        # Migration: ajouter signal_price si absente
+        self._migrate_signals_columns(conn)
+
+        # Table signal_reviews (etape 6 — feedback loop)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signal_reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL UNIQUE,
+                ticker TEXT NOT NULL,
+                signal_date TEXT NOT NULL,
+                signal_price REAL NOT NULL,
+                review_date TEXT NOT NULL,
+                review_price REAL NOT NULL,
+                performance_pct REAL NOT NULL,
+                outcome TEXT NOT NULL CHECK (outcome IN ('WIN', 'LOSS', 'NEUTRAL')),
+                failure_reason TEXT,
+                catalyst_type TEXT,
+                features_json TEXT,
+                reviewed_at TEXT NOT NULL,
+                FOREIGN KEY (signal_id) REFERENCES signals(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_signal_reviews_ticker
+                ON signal_reviews(ticker);
+            CREATE INDEX IF NOT EXISTS idx_signal_reviews_date
+                ON signal_reviews(review_date);
+        """)
+
+        # Table filter_rules (etape 6 — regles de filtrage adaptatives)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS filter_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rule_type TEXT NOT NULL,
+                rule_json TEXT NOT NULL,
+                win_rate REAL,
+                sample_size INTEGER,
+                created_at TEXT NOT NULL,
+                active INTEGER DEFAULT 1
+            );
+        """)
+
+        # Table model_versions (etape 6 — versioning modeles)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS model_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                version TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                trained_at TEXT NOT NULL,
+                training_signals INTEGER DEFAULT 0,
+                accuracy REAL,
+                precision_score REAL,
+                recall REAL,
+                f1 REAL,
+                is_active INTEGER DEFAULT 0,
+                notes TEXT
+            );
+        """)
 
         conn.close()
         logger.info(f"Base de données initialisée: {self.db_path}")
@@ -182,6 +238,14 @@ class Database:
         if "source_api" not in existing:
             conn.execute("ALTER TABLE news ADD COLUMN source_api TEXT DEFAULT 'gnews'")
             logger.info("Migration: colonne 'source_api' ajoutee a la table news")
+        conn.commit()
+
+    def _migrate_signals_columns(self, conn: sqlite3.Connection):
+        """Ajoute la colonne signal_price a la table signals si absente."""
+        existing = [row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()]
+        if "signal_price" not in existing:
+            conn.execute("ALTER TABLE signals ADD COLUMN signal_price REAL")
+            logger.info("Migration: colonne 'signal_price' ajoutee a la table signals")
         conn.commit()
 
     def insert_execution(self, execution: dict):
@@ -584,13 +648,13 @@ class Database:
         conn.execute("""
             INSERT OR IGNORE INTO signals
                 (ticker, date, score, catalyst_type,
-                 catalyst_news_title, features_json, sent_at)
+                 catalyst_news_title, features_json, sent_at, signal_price)
             VALUES
                 (:ticker, :date, :score, :catalyst_type,
-                 :catalyst_news_title, :features_json, :sent_at)
+                 :catalyst_news_title, :features_json, :sent_at, :signal_price)
         """, {
             "catalyst_type": None, "catalyst_news_title": None,
-            "features_json": None, "sent_at": None,
+            "features_json": None, "sent_at": None, "signal_price": None,
             **signal,
         })
         conn.commit()
@@ -627,3 +691,168 @@ class Database:
         count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
         conn.close()
         return count
+
+    # --- Signal Reviews ---
+
+    def insert_signal_review(self, review: dict):
+        """Insere une review de signal. Ignore si signal_id deja reviewe."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT OR IGNORE INTO signal_reviews
+                (signal_id, ticker, signal_date, signal_price, review_date,
+                 review_price, performance_pct, outcome, failure_reason,
+                 catalyst_type, features_json, reviewed_at)
+            VALUES
+                (:signal_id, :ticker, :signal_date, :signal_price, :review_date,
+                 :review_price, :performance_pct, :outcome, :failure_reason,
+                 :catalyst_type, :features_json, :reviewed_at)
+        """, review)
+        conn.commit()
+        conn.close()
+
+    def get_signal_reviews(self, ticker: str | None = None) -> list[dict]:
+        """Recupere les reviews, optionnellement filtrees par ticker."""
+        conn = self._connect()
+        if ticker:
+            rows = conn.execute(
+                "SELECT * FROM signal_reviews WHERE ticker = ? ORDER BY signal_date DESC",
+                (ticker,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM signal_reviews ORDER BY signal_date DESC"
+            ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_pending_signal_reviews(self, current_date: str) -> list[dict]:
+        """Recupere les signaux envoyes il y a 3+ jours sans review."""
+        conn = self._connect()
+        rows = conn.execute("""
+            SELECT s.* FROM signals s
+            LEFT JOIN signal_reviews sr ON sr.signal_id = s.id
+            WHERE sr.id IS NULL
+              AND s.sent_at IS NOT NULL
+              AND julianday(?) - julianday(s.date) >= 3
+            ORDER BY s.date
+        """, (current_date,)).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_reviews_in_period(self, date_start: str, date_end: str) -> list[dict]:
+        """Recupere les reviews dont le signal_date est dans la periode."""
+        conn = self._connect()
+        rows = conn.execute("""
+            SELECT * FROM signal_reviews
+            WHERE signal_date BETWEEN ? AND ?
+            ORDER BY signal_date
+        """, (date_start, date_end)).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_review_stats(self) -> dict:
+        """Retourne les stats globales des reviews."""
+        conn = self._connect()
+        rows = conn.execute("""
+            SELECT outcome, COUNT(*) as cnt
+            FROM signal_reviews
+            GROUP BY outcome
+        """).fetchall()
+        conn.close()
+        stats = {"total": 0, "wins": 0, "losses": 0, "neutrals": 0}
+        for row in rows:
+            outcome = row["outcome"]
+            count = row["cnt"]
+            stats["total"] += count
+            if outcome == "WIN":
+                stats["wins"] = count
+            elif outcome == "LOSS":
+                stats["losses"] = count
+            elif outcome == "NEUTRAL":
+                stats["neutrals"] = count
+        return stats
+
+    # --- Filter Rules ---
+
+    def insert_filter_rule(self, rule: dict):
+        """Insere une regle de filtrage."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT INTO filter_rules
+                (rule_type, rule_json, win_rate, sample_size, created_at, active)
+            VALUES
+                (:rule_type, :rule_json, :win_rate, :sample_size, :created_at, :active)
+        """, {
+            "win_rate": None, "sample_size": None, "active": 1,
+            **rule,
+        })
+        conn.commit()
+        conn.close()
+
+    def get_active_filter_rules(self) -> list[dict]:
+        """Recupere les regles de filtrage actives."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM filter_rules WHERE active = 1 ORDER BY id"
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def deactivate_filter_rule(self, rule_id: int):
+        """Desactive une regle de filtrage."""
+        conn = self._connect()
+        conn.execute(
+            "UPDATE filter_rules SET active = 0 WHERE id = ?",
+            (rule_id,),
+        )
+        conn.commit()
+        conn.close()
+
+    # --- Model Versions ---
+
+    def insert_model_version(self, version: dict):
+        """Insere une version de modele."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT INTO model_versions
+                (version, file_path, trained_at, training_signals,
+                 accuracy, precision_score, recall, f1, is_active, notes)
+            VALUES
+                (:version, :file_path, :trained_at, :training_signals,
+                 :accuracy, :precision_score, :recall, :f1, :is_active, :notes)
+        """, {
+            "training_signals": 0, "accuracy": None, "precision_score": None,
+            "recall": None, "f1": None, "is_active": 0, "notes": None,
+            **version,
+        })
+        conn.commit()
+        conn.close()
+
+    def get_active_model_version(self) -> dict | None:
+        """Recupere la version de modele active."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM model_versions WHERE is_active = 1 LIMIT 1"
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_all_model_versions(self) -> list[dict]:
+        """Recupere toutes les versions de modeles."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT * FROM model_versions ORDER BY id"
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def set_active_model(self, version_id: int):
+        """Active un modele et desactive tous les autres."""
+        conn = self._connect()
+        conn.execute("UPDATE model_versions SET is_active = 0")
+        conn.execute(
+            "UPDATE model_versions SET is_active = 1 WHERE id = ?",
+            (version_id,),
+        )
+        conn.commit()
+        conn.close()
