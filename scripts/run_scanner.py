@@ -106,7 +106,7 @@ def run_daily_review(db, config, telegram, dry_run):
 
 
 def update_filter_rules(db, config):
-    """Mise a jour des regles de filtrage adaptatives."""
+    """Mise a jour des stats catalyseur et seuil adaptatif."""
     import json as _json
     from src.feedback.performance_tracker import PerformanceTracker
 
@@ -124,7 +124,7 @@ def update_filter_rules(db, config):
             "active": 1,
         })
 
-    logger.info(f"Regles mises a jour: {len(rules)} regles, seuil={threshold:.2f}")
+    logger.info(f"Stats mises a jour: {len(rules)} catalyseurs, seuil={threshold:.2f}")
 
 
 def check_retrain(db, config, telegram, dry_run):
@@ -196,6 +196,11 @@ def score_and_alert(predictor: Predictor, signal_filter: SignalFilter,
               f"{s.get('technical_summary', '')}")
     print()
 
+    # Charger les stats catalyseur pour enrichir les alertes
+    from src.feedback.performance_tracker import PerformanceTracker
+    tracker = PerformanceTracker(signal_filter.db)
+    catalyst_stats = tracker.get_catalyst_stats()
+
     # Filtrer
     filtered = signal_filter.filter_signals(signals)
 
@@ -205,6 +210,7 @@ def score_and_alert(predictor: Predictor, signal_filter: SignalFilter,
 
     # Envoyer les alertes
     for signal in filtered:
+        signal["catalyst_stats"] = catalyst_stats
         message = formatter.format_signal(signal)
 
         if dry_run:

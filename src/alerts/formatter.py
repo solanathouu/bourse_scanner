@@ -36,6 +36,18 @@ class AlertFormatter:
                 lines.append(f'"{escape(news_title)}"')
             lines.append("")
 
+        # Feedback — win rate historique pour ce type de catalyseur
+        catalyst_stats = signal.get("catalyst_stats", {})
+        cat_stat = catalyst_stats.get(cat_type)
+        if cat_stat and cat_stat.get("total", 0) >= 3:
+            wr = cat_stat["win_rate"]
+            total = cat_stat["total"]
+            wins = cat_stat.get("wins", 0)
+            lines.append(
+                f"Feedback: {cat_type} = {wr:.0%} WR "
+                f"({wins}/{total} signaux passes)"
+            )
+
         # Technique
         tech_summary = signal.get("technical_summary", "")
         if tech_summary and tech_summary != "N/A":

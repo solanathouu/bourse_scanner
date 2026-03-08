@@ -63,6 +63,29 @@ class TestAlertFormatter:
         assert "PE 15.2" in msg
         assert "28" in msg
 
+    def test_format_signal_with_feedback_stats(self):
+        """Le message contient le win rate feedback si disponible."""
+        signal = {
+            "ticker": "SAN.PA", "name": "SANOFI", "score": 0.82,
+            "catalyst_type": "EARNINGS", "features": {},
+            "catalyst_stats": {
+                "EARNINGS": {"win_rate": 0.25, "wins": 2, "total": 8},
+            },
+        }
+        msg = self.formatter.format_signal(signal)
+        assert "Feedback" in msg
+        assert "25%" in msg
+        assert "2/8" in msg
+
+    def test_format_signal_no_feedback_without_stats(self):
+        """Pas de ligne feedback si pas de stats."""
+        signal = {
+            "ticker": "SAN.PA", "name": "SANOFI", "score": 0.82,
+            "catalyst_type": "EARNINGS", "features": {},
+        }
+        msg = self.formatter.format_signal(signal)
+        assert "Feedback" not in msg
+
     def test_format_daily_summary(self):
         """Le resume quotidien liste les signaux."""
         signals = [

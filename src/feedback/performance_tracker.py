@@ -36,28 +36,30 @@ class PerformanceTracker:
     def compute_adaptive_threshold(self) -> float:
         """Compute adaptive threshold based on global win rate.
 
-        - Win rate < 40% -> threshold + 0.04
-        - Win rate 40-50% -> threshold + 0.02
-        - Win rate >= 50% -> threshold unchanged
-        - Max 0.95
+        Ajustements doux pour ne pas bloquer trop de signaux:
+        - Win rate < 30% -> threshold + 0.02
+        - Win rate 30-40% -> threshold + 0.01
+        - Win rate >= 40% -> threshold unchanged
+        - Max 0.82 (cap pour garder du flux)
         """
         stats = self.db.get_review_stats()
         if stats["total"] < self.min_samples:
             return self.base_threshold
         win_rate = stats["wins"] / stats["total"] if stats["total"] > 0 else 0.0
         threshold = self.base_threshold
-        if win_rate < 0.40:
-            threshold += 0.04
-        elif win_rate < 0.50:
+        if win_rate < 0.30:
             threshold += 0.02
-        return min(round(threshold, 2), 0.95)
+        elif win_rate < 0.40:
+            threshold += 0.01
+        return min(round(threshold, 2), 0.82)
 
     def generate_filter_rules(self) -> list[dict]:
         """Generate filter rules based on failure patterns.
 
-        - EXCLUDE_CATALYST if a catalyst type has < 30% win rate on min_samples+ samples
-        - MAX_SIGNALS_PER_DAY always set to 2
-        Deactivates all existing rules first, then creates new ones.
+        Stocke des CATALYST_STATS (informatif, pas bloquant) pour chaque
+        type de catalyseur avec assez de samples.
+        Ne genere JAMAIS de regles EXCLUDE — on veut garder le flux
+        de signaux pour que le bot apprenne.
         """
         rates = self.win_rate_by_catalyst()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -68,40 +70,48 @@ class PerformanceTracker:
         for rule in existing:
             self.db.deactivate_filter_rule(rule["id"])
 
-        # Generate EXCLUDE_CATALYST rules
+        # Generate CATALYST_STATS rules (informational, not blocking)
         for cat, data in rates.items():
             if data["total"] < self.min_samples:
                 continue
-            if data["win_rate"] < 0.30:
-                rule = {
-                    "rule_type": "EXCLUDE_CATALYST",
-                    "rule_json": json.dumps({"catalyst_type": cat}),
-                    "win_rate": round(data["win_rate"], 4),
-                    "sample_size": data["total"],
-                    "created_at": now,
-                    "active": 1,
-                }
-                self.db.insert_filter_rule(rule)
-                new_rules.append(rule)
-                logger.info(
-                    f"Regle EXCLUDE_CATALYST: {cat} "
-                    f"(win_rate={data['win_rate']:.0%}, n={data['total']})"
-                )
+            rule = {
+                "rule_type": "CATALYST_STATS",
+                "rule_json": json.dumps({
+                    "catalyst_type": cat,
+                    "wins": data["wins"],
+                    "total": data["total"],
+                }),
+                "win_rate": round(data["win_rate"], 4),
+                "sample_size": data["total"],
+                "created_at": now,
+                "active": 1,
+            }
+            self.db.insert_filter_rule(rule)
+            new_rules.append(rule)
+            logger.info(
+                f"Stats {cat}: win_rate={data['win_rate']:.0%}, n={data['total']}"
+            )
 
-        # Always add MAX_SIGNALS_PER_DAY
-        rule_max = {
-            "rule_type": "MAX_SIGNALS_PER_DAY",
-            "rule_json": json.dumps({"max": 2}),
-            "win_rate": None,
-            "sample_size": None,
-            "created_at": now,
-            "active": 1,
-        }
-        self.db.insert_filter_rule(rule_max)
-        new_rules.append(rule_max)
-
-        logger.info(f"{len(new_rules)} regles de filtrage generees")
+        logger.info(f"{len(new_rules)} stats catalyseur mises a jour")
         return new_rules
+
+    def get_catalyst_stats(self) -> dict[str, dict]:
+        """Return catalyst stats from active CATALYST_STATS rules.
+
+        Returns: {"EARNINGS": {"win_rate": 0.5, "wins": 3, "total": 6}, ...}
+        """
+        rules = self.db.get_active_filter_rules()
+        stats = {}
+        for rule in rules:
+            if rule["rule_type"] == "CATALYST_STATS":
+                data = json.loads(rule["rule_json"])
+                cat = data["catalyst_type"]
+                stats[cat] = {
+                    "win_rate": rule["win_rate"],
+                    "wins": data.get("wins", 0),
+                    "total": data.get("total", 0),
+                }
+        return stats
 
     def get_daily_summary(self, reviews: list[dict]) -> str:
         """Format daily review summary as HTML for Telegram."""
@@ -162,17 +172,16 @@ class PerformanceTracker:
             )
 
         rules = self.db.get_active_filter_rules()
-        if rules:
-            lines.extend(["", "Regles actives:"])
-            for rule in rules:
+        cat_stats = [r for r in rules if r["rule_type"] == "CATALYST_STATS"]
+        if cat_stats:
+            lines.extend(["", "Win rate par catalyseur:"])
+            for rule in sorted(cat_stats, key=lambda r: r["win_rate"] or 0):
                 data = json.loads(rule["rule_json"])
-                if rule["rule_type"] == "EXCLUDE_CATALYST":
-                    lines.append(
-                        f"  - Exclure {data['catalyst_type']} "
-                        f"(win_rate={rule['win_rate']:.0%})"
-                    )
-                elif rule["rule_type"] == "MAX_SIGNALS_PER_DAY":
-                    lines.append(f"  - Max {data['max']} signaux/jour")
+                wr = rule["win_rate"] or 0
+                lines.append(
+                    f"  - {data['catalyst_type']}: "
+                    f"{wr:.0%} ({data.get('wins', 0)}/{data.get('total', 0)})"
+                )
 
         threshold = self.compute_adaptive_threshold()
         lines.append(f"\nSeuil adaptatif: {threshold:.2f}")

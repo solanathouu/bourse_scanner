@@ -111,12 +111,12 @@ class TestAdaptiveFiltering:
     def teardown_method(self):
         self.tmp.cleanup()
 
-    def test_exclude_catalyst_rule(self):
-        """Les signaux avec catalyst exclu sont filtres."""
+    def test_no_catalyst_exclusion(self):
+        """Les signaux ne sont JAMAIS filtres par catalyst type."""
         self.db.insert_filter_rule({
-            "rule_type": "EXCLUDE_CATALYST",
-            "rule_json": '{"catalyst_type": "TECHNICAL"}',
-            "win_rate": 0.20, "sample_size": 10,
+            "rule_type": "CATALYST_STATS",
+            "rule_json": '{"catalyst_type": "TECHNICAL", "wins": 1, "total": 10}',
+            "win_rate": 0.10, "sample_size": 10,
             "created_at": "2026-03-07", "active": 1,
         })
         signals = [
@@ -124,24 +124,17 @@ class TestAdaptiveFiltering:
             {"ticker": "DBV.PA", "score": 0.82, "catalyst_type": "TECHNICAL"},
         ]
         filtered = self.sf.filter_signals(signals)
-        assert len(filtered) == 1
-        assert filtered[0]["ticker"] == "SAN.PA"
+        assert len(filtered) == 2
 
-    def test_max_signals_per_day(self):
-        """La limite par jour tronque les signaux excedentaires."""
-        self.db.insert_filter_rule({
-            "rule_type": "MAX_SIGNALS_PER_DAY",
-            "rule_json": '{"max": 2}',
-            "win_rate": None, "sample_size": None,
-            "created_at": "2026-03-07", "active": 1,
-        })
+    def test_all_signals_pass_above_threshold(self):
+        """Tous les signaux au-dessus du seuil passent."""
         signals = [
             {"ticker": "SAN.PA", "score": 0.90, "catalyst_type": "EARNINGS"},
             {"ticker": "DBV.PA", "score": 0.88, "catalyst_type": "UPGRADE"},
-            {"ticker": "MAU.PA", "score": 0.85, "catalyst_type": "EARNINGS"},
+            {"ticker": "MAU.PA", "score": 0.85, "catalyst_type": "UNKNOWN"},
         ]
         filtered = self.sf.filter_signals(signals)
-        assert len(filtered) == 2
+        assert len(filtered) == 3
 
     def test_adaptive_threshold(self):
         """Le seuil adaptatif remplace le seuil par defaut."""

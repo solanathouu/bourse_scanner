@@ -127,7 +127,7 @@ class TestAdaptiveThreshold:
         assert self.tracker.compute_adaptive_threshold() == 0.75
 
     def test_medium_win_rate_small_increase(self):
-        """Win rate 40-50% augmente le seuil de 0.02."""
+        """Win rate 30-40% augmente le seuil de 0.01."""
         _seed_reviews(self.db, [
             ("MC.PA", "WIN", 5.0, "EARNINGS", 0.85),
             ("BN.PA", "WIN", 3.0, "EARNINGS", 0.80),
@@ -135,11 +135,11 @@ class TestAdaptiveThreshold:
             ("OR.PA", "LOSS", -1.0, "UPGRADE", 0.82),
             ("SAN.PA", "LOSS", -3.0, "CONTRAT", 0.76),
         ])
-        # 2/5 = 40% win rate -> +0.02
-        assert self.tracker.compute_adaptive_threshold() == 0.77
+        # 2/5 = 40% win rate -> >= 40% -> unchanged
+        assert self.tracker.compute_adaptive_threshold() == 0.75
 
-    def test_low_win_rate_large_increase(self):
-        """Win rate < 40% augmente le seuil de 0.04."""
+    def test_low_win_rate_increase(self):
+        """Win rate < 30% augmente le seuil de 0.02."""
         _seed_reviews(self.db, [
             ("MC.PA", "WIN", 5.0, "EARNINGS", 0.85),
             ("BN.PA", "LOSS", -2.0, "EARNINGS", 0.80),
@@ -147,12 +147,12 @@ class TestAdaptiveThreshold:
             ("OR.PA", "LOSS", -1.0, "UPGRADE", 0.82),
             ("SAN.PA", "LOSS", -3.0, "CONTRAT", 0.76),
         ])
-        # 1/5 = 20% win rate -> +0.04
-        assert self.tracker.compute_adaptive_threshold() == 0.79
+        # 1/5 = 20% win rate -> +0.02
+        assert self.tracker.compute_adaptive_threshold() == 0.77
 
-    def test_threshold_capped_at_095(self):
-        """Le seuil ne depasse jamais 0.95."""
-        tracker = PerformanceTracker(self.db, base_threshold=0.93, min_samples=5)
+    def test_threshold_capped_at_082(self):
+        """Le seuil ne depasse jamais 0.82."""
+        tracker = PerformanceTracker(self.db, base_threshold=0.81, min_samples=5)
         _seed_reviews(self.db, [
             ("MC.PA", "LOSS", -5.0, "EARNINGS", 0.85),
             ("BN.PA", "LOSS", -2.0, "EARNINGS", 0.80),
@@ -160,36 +160,32 @@ class TestAdaptiveThreshold:
             ("OR.PA", "LOSS", -1.0, "UPGRADE", 0.82),
             ("SAN.PA", "LOSS", -3.0, "CONTRAT", 0.76),
         ])
-        # 0/5 = 0% -> 0.93 + 0.04 = 0.97, capped at 0.95
-        assert tracker.compute_adaptive_threshold() == 0.95
+        # 0/5 = 0% -> 0.81 + 0.02 = 0.83, capped at 0.82
+        assert tracker.compute_adaptive_threshold() == 0.82
 
-    def test_50_percent_win_rate_threshold(self):
-        """Win rate exactement 50% est dans la tranche 40-50% -> +0.02."""
+    def test_35_percent_win_rate_threshold(self):
+        """Win rate 30-40% augmente le seuil de 0.01."""
         _seed_reviews(self.db, [
             ("MC.PA", "WIN", 5.0, "EARNINGS", 0.85),
             ("BN.PA", "WIN", 3.0, "EARNINGS", 0.80),
-            ("AI.PA", "WIN", 4.0, "EARNINGS", 0.78),
+            ("AI.PA", "LOSS", -2.0, "EARNINGS", 0.78),
             ("OR.PA", "LOSS", -1.0, "UPGRADE", 0.82),
             ("SAN.PA", "LOSS", -3.0, "CONTRAT", 0.76),
             ("RNO.PA", "LOSS", -2.0, "CONTRAT", 0.76),
         ])
-        # 3/6 = 50% -> still < 0.50 is false, so check 50% boundary
-        # 50% is not < 0.50, so no +0.02; also not < 0.40
-        # >= 50% and < 60%: no adjustment in the spec
-        # Actually: < 0.40 -> +0.04, < 0.50 -> +0.02, >= 0.60 -> unchanged
-        # 50% is NOT < 0.50, so no +0.02. And not < 0.40. So unchanged.
-        assert self.tracker.compute_adaptive_threshold() == 0.75
+        # 2/6 = 33% -> < 40%, >= 30% -> +0.01
+        assert self.tracker.compute_adaptive_threshold() == 0.76
 
 
 class TestFilterRuleGeneration:
-    """Tests de la generation de regles de filtrage."""
+    """Tests de la generation de stats catalyseur."""
 
     def setup_method(self):
         self.db = _make_db()
         self.tracker = PerformanceTracker(self.db, min_samples=3)
 
-    def test_generates_exclude_for_bad_catalyst(self):
-        """Genere EXCLUDE_CATALYST si win_rate < 30% avec assez de samples."""
+    def test_generates_stats_for_catalyst(self):
+        """Genere CATALYST_STATS pour chaque type avec assez de samples."""
         _seed_reviews(self.db, [
             ("MC.PA", "LOSS", -5.0, "RUMOR", 0.85),
             ("BN.PA", "LOSS", -2.0, "RUMOR", 0.80),
@@ -199,56 +195,63 @@ class TestFilterRuleGeneration:
             ("RNO.PA", "WIN", 2.0, "EARNINGS", 0.76),
         ])
         rules = self.tracker.generate_filter_rules()
-        exclude_rules = [r for r in rules if r["rule_type"] == "EXCLUDE_CATALYST"]
-        assert len(exclude_rules) == 1
-        data = json.loads(exclude_rules[0]["rule_json"])
-        assert data["catalyst_type"] == "RUMOR"
+        stats_rules = [r for r in rules if r["rule_type"] == "CATALYST_STATS"]
+        assert len(stats_rules) == 2
+        types = {json.loads(r["rule_json"])["catalyst_type"] for r in stats_rules}
+        assert "RUMOR" in types
+        assert "EARNINGS" in types
 
-    def test_no_exclude_if_not_enough_samples(self):
-        """Pas de EXCLUDE_CATALYST si moins de min_samples."""
+    def test_no_stats_if_not_enough_samples(self):
+        """Pas de stats si moins de min_samples."""
         _seed_reviews(self.db, [
             ("MC.PA", "LOSS", -5.0, "RUMOR", 0.85),
             ("BN.PA", "LOSS", -2.0, "RUMOR", 0.80),
-            # Only 2 RUMOR samples, min_samples=3
+        ])
+        rules = self.tracker.generate_filter_rules()
+        stats_rules = [r for r in rules if r["rule_type"] == "CATALYST_STATS"]
+        assert len(stats_rules) == 0
+
+    def test_never_generates_exclude_rules(self):
+        """Ne genere JAMAIS de regles EXCLUDE_CATALYST."""
+        _seed_reviews(self.db, [
+            ("MC.PA", "LOSS", -5.0, "RUMOR", 0.85),
+            ("BN.PA", "LOSS", -2.0, "RUMOR", 0.80),
+            ("AI.PA", "LOSS", -2.0, "RUMOR", 0.78),
         ])
         rules = self.tracker.generate_filter_rules()
         exclude_rules = [r for r in rules if r["rule_type"] == "EXCLUDE_CATALYST"]
         assert len(exclude_rules) == 0
 
-    def test_always_generates_max_signals_per_day(self):
-        """MAX_SIGNALS_PER_DAY est toujours genere."""
-        rules = self.tracker.generate_filter_rules()
-        max_rules = [r for r in rules if r["rule_type"] == "MAX_SIGNALS_PER_DAY"]
-        assert len(max_rules) == 1
-        data = json.loads(max_rules[0]["rule_json"])
-        assert data["max"] == 2
-
     def test_deactivates_old_rules(self):
         """Les anciennes regles sont desactivees avant d'en creer de nouvelles."""
-        # Generate first set
+        _seed_reviews(self.db, [
+            ("MC.PA", "LOSS", -5.0, "RUMOR", 0.85),
+            ("BN.PA", "LOSS", -2.0, "RUMOR", 0.80),
+            ("AI.PA", "LOSS", -2.0, "RUMOR", 0.78),
+        ])
         self.tracker.generate_filter_rules()
         old_rules = self.db.get_active_filter_rules()
         assert len(old_rules) > 0
 
         # Generate again
         self.tracker.generate_filter_rules()
-        # Old rules should be deactivated
         all_rules = self.db.get_active_filter_rules()
-        # Only the new batch should be active (just MAX_SIGNALS_PER_DAY since no reviews)
+        # Only new batch active
         assert len(all_rules) == 1
-        assert all_rules[0]["rule_type"] == "MAX_SIGNALS_PER_DAY"
+        assert all_rules[0]["rule_type"] == "CATALYST_STATS"
 
-    def test_no_exclude_for_good_catalyst(self):
-        """Pas de EXCLUDE si win_rate >= 30%."""
+    def test_stats_contain_wins_and_total(self):
+        """Les stats contiennent wins et total."""
         _seed_reviews(self.db, [
             ("MC.PA", "WIN", 5.0, "EARNINGS", 0.85),
             ("BN.PA", "LOSS", -2.0, "EARNINGS", 0.80),
             ("AI.PA", "LOSS", -2.0, "EARNINGS", 0.78),
         ])
-        # 1/3 = 33% win rate -> >= 30%, no exclude
         rules = self.tracker.generate_filter_rules()
-        exclude_rules = [r for r in rules if r["rule_type"] == "EXCLUDE_CATALYST"]
-        assert len(exclude_rules) == 0
+        data = json.loads(rules[0]["rule_json"])
+        assert data["catalyst_type"] == "EARNINGS"
+        assert data["wins"] == 1
+        assert data["total"] == 3
 
     def test_rules_persisted_in_db(self):
         """Les regles generees sont bien en base."""
@@ -260,8 +263,33 @@ class TestFilterRuleGeneration:
         self.tracker.generate_filter_rules()
         db_rules = self.db.get_active_filter_rules()
         rule_types = [r["rule_type"] for r in db_rules]
-        assert "EXCLUDE_CATALYST" in rule_types
-        assert "MAX_SIGNALS_PER_DAY" in rule_types
+        assert "CATALYST_STATS" in rule_types
+        assert "EXCLUDE_CATALYST" not in rule_types
+
+
+class TestGetCatalystStats:
+    """Tests de la recuperation des stats catalyseur."""
+
+    def setup_method(self):
+        self.db = _make_db()
+        self.tracker = PerformanceTracker(self.db, min_samples=3)
+
+    def test_empty_stats(self):
+        """Sans regles, retourne dict vide."""
+        assert self.tracker.get_catalyst_stats() == {}
+
+    def test_returns_stats_from_rules(self):
+        """Retourne les stats depuis les regles CATALYST_STATS."""
+        _seed_reviews(self.db, [
+            ("MC.PA", "WIN", 5.0, "EARNINGS", 0.85),
+            ("BN.PA", "LOSS", -2.0, "EARNINGS", 0.80),
+            ("AI.PA", "LOSS", -2.0, "EARNINGS", 0.78),
+        ])
+        self.tracker.generate_filter_rules()
+        stats = self.tracker.get_catalyst_stats()
+        assert "EARNINGS" in stats
+        assert stats["EARNINGS"]["wins"] == 1
+        assert stats["EARNINGS"]["total"] == 3
 
 
 class TestDailySummary:
@@ -387,8 +415,8 @@ class TestWeeklySummary:
         assert "2026-03-01" in result
         assert "2026-03-07" in result
 
-    def test_shows_active_rules(self):
-        """Le bilan affiche les regles actives."""
+    def test_shows_catalyst_stats(self):
+        """Le bilan affiche les stats par catalyseur."""
         _seed_reviews(self.db, [
             ("MC.PA", "LOSS", -5.0, "RUMOR", 0.85),
             ("BN.PA", "LOSS", -2.0, "RUMOR", 0.80),
@@ -399,5 +427,5 @@ class TestWeeklySummary:
         tracker = PerformanceTracker(self.db, min_samples=3)
         tracker.generate_filter_rules()
         result = tracker.get_weekly_summary("2026-03-01", "2026-03-07")
-        assert "Regles actives" in result
-        assert "Exclure RUMOR" in result
+        assert "Win rate par catalyseur" in result
+        assert "RUMOR" in result
