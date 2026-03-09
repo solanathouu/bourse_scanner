@@ -5,7 +5,7 @@ Bot Python de veille boursiere PEA. Analyse des donnees marche en temps reel, co
 ## Commandes
 
 ```bash
-uv run pytest tests/ -v          # Lancer tous les tests (375 tests)
+uv run pytest tests/ -v          # Lancer tous les tests (379 tests)
 uv run pytest tests/ -v -x       # Stopper au premier echec
 uv run python scripts/init_db.py       # Initialiser la base SQLite
 uv run python scripts/import_pdfs.py   # Importer les PDF dans la base
@@ -138,12 +138,12 @@ SQLite dans `data/trades.db`. Tables principales (11 tables):
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1+2+3+4+4bis+4ter+5+7 DONE | pdf_parser, trade_matcher, database, 6 collectors, ticker_mapper, catalyst_matcher, news_classifier, technical_indicators, feature_engine, llm_analyzer, llm_sentiment, fundamental_collector, newsdata_collector, boursorama_scraper, trainer, evaluator, predictor, signal_filter, formatter, telegram_bot, run_scanner, signal_reviewer, performance_tracker, model_retrainer, run_feedback |
-| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + OPENAI_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
-| Tests | 375/375 PASS | database(56), pdf_parser(17), trade_matcher(7), ticker_mapper(11), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(26), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6), predictor(10), signal_filter(13), formatter(6), telegram_bot(4), signal_reviewer(32), performance_tracker(29), model_retrainer(22) |
-| Data | Collectee + LLM analysee + enrichie | 214 exec, 166 trades, 1357+ prix, 1824+ news, 649 catalyseurs, 141 analyses LLM, fondamentaux |
+| Code | Etape 1-7 DONE + feedback debrided | Filtrage adaptatif remplace par CATALYST_STATS informatif (plus de blocage). 12 jobs scheduler (4 nouvelles sources). Seuil 0.50 pour maximiser les signaux et le feedback. |
+| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + OPENAI_API_KEY + NEWSDATA_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
+| Tests | 379/379 PASS | database(56), pdf_parser(17), trade_matcher(7), ticker_mapper(11), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(26), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6), predictor(10), signal_filter(13), formatter(7), telegram_bot(4), signal_reviewer(32), performance_tracker(29), model_retrainer(22) |
+| Data | Collectee + LLM analysee + enrichie + 97 reviews | 214 exec, 166 trades, 1357+ prix, 1824+ news, 649 catalyseurs, 141 analyses LLM, 97 signal reviews |
 | Docs | Design + plans Etapes 2-5 | docs/plans/2026-02-22-etape*-*.md, 2026-02-23-etape4-*.md, 2026-02-24-etape4-llm-*.md |
-| Git | Pushe sur origin | 27+ commits, master a jour |
+| Git | Pushe sur origin | 30+ commits, master a jour |
 
 ## Sources de donnees actives
 
@@ -196,16 +196,31 @@ L'etape 4 (Feature Engineering + ML) doit:
 - NE PAS traiter tous les trades de la meme facon (un trade sur annonce de bilan ≠ un trade technique)
 - NE PAS oublier que c'est la COMBINAISON catalyseur + conditions techniques qui fait le trade
 
+## Changements recents (mars 2026)
+
+**Philosophie: envoyer TOUT pour que le bot apprenne.** Le feedback loop sur-filtrait (EXCLUDE_CATALYST bloquait 96% des signaux). Corrige:
+
+1. **Filtrage debrided**: EXCLUDE_CATALYST remplace par CATALYST_STATS (informatif, pas bloquant). Les alertes Telegram montrent le win rate historique du catalyseur mais ne bloquent plus l'envoi.
+2. **Seuil abaisse a 0.50**: On envoie TOUS les signaux, meme faibles, pour avoir des donnees negatives (le modele etait entraine sur 89% de trades gagnants).
+3. **4 nouvelles sources dans le scheduler**: Alpha Vantage (8h), Marketaux (12h), Newsdata.io (14h), LLM Sentiment (toutes les 2h). Total: 12 jobs.
+4. **Seuil adaptatif adouci**: +0.02 si WR<30%, +0.01 si WR<40%, cap base+0.10 (etait +0.04/+0.02, cap 0.95).
+5. **Fix retrain**: `date_achat` ajoute au vecteur de features pour le walk-forward split.
+
+**Limitation connue**: Le retrain utilise toujours les 111 trades historiques. Les 97+ signal reviews ne sont PAS encore incorporees dans les donnees d'entrainement. C'est la prochaine evolution majeure.
+
 ## Next Immediate Action
 
-**Monitoring du feedback loop.** Le bot tourne sur le VPS avec 8 jobs schedules.
+**Monitorer les signaux avec la nouvelle config.** Le bot tourne sur le VPS avec 12 jobs, seuil 0.50.
 
-Prochaines etapes possibles:
-1. **Monitorer** les reviews J+3 quotidiennes (premieres reviews dans 3 jours)
-2. **Verifier** que le seuil adaptatif monte quand le win rate est bas
-3. **Observer** les regles de filtrage generees automatiquement
-4. **Attendre 50 reviews** pour le premier re-entrainement automatique
-5. **Ameliorer** le modele si les resultats ne sont pas satisfaisants
+Actions immediates:
+1. **Verifier** que les 4 nouvelles sources collectent bien des donnees sur le VPS
+2. **Monitorer** les alertes Telegram — on devrait recevoir beaucoup plus de signaux
+3. **Observer** les reviews J+3 (37 reviews en attente, en attente des prix)
+
+Prochaines evolutions:
+1. **PRIORITE**: Incorporer les signal_reviews dans les donnees d'entrainement du modele (actuellement seuls les 111 trades historiques sont utilises)
+2. **Attendre 50+ reviews** avec la nouvelle config pour evaluer la qualite
+3. **Ameliorer** le modele quand on aura assez de donnees negatives
 
 ## Donnees cles du trading
 
