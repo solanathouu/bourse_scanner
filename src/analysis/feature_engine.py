@@ -246,6 +246,7 @@ class FeatureEngine:
         # Assembler
         features = {
             "trade_id": trade["id"],
+            "date_achat": date_achat,
             **tech_features,
             **cat_features,
             **fund_features,
