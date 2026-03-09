@@ -71,6 +71,113 @@ def collect_news(db: Database):
     )
 
 
+def collect_alpha_vantage(db: Database, watchlist: list[dict]):
+    """Collecte news Alpha Vantage pour les derniers jours (25 req/jour max)."""
+    from src.data_collection.alpha_vantage_collector import AlphaVantageCollector
+
+    collector = AlphaVantageCollector(db)
+    if not collector.api_key:
+        return
+
+    today = datetime.now().strftime("%Y%m%d")
+    from_date = (datetime.now() - timedelta(days=3)).strftime("%Y%m%d")
+    total = 0
+
+    tickers_done = 0
+    for item in watchlist:
+        if item.get("etf") or tickers_done >= 25:
+            continue
+        try:
+            count = collector.collect_for_action(
+                item["name"], item["ticker"],
+                f"{from_date}T0000", f"{today}T2359",
+            )
+            total += count
+            tickers_done += 1
+            import time
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"Alpha Vantage erreur {item['ticker']}: {e}")
+
+    logger.info(f"Alpha Vantage: {total} news pour {tickers_done} tickers")
+
+
+def collect_marketaux(db: Database, watchlist: list[dict]):
+    """Collecte news Marketaux pour les derniers jours."""
+    from src.data_collection.marketaux_collector import MarketauxCollector
+
+    collector = MarketauxCollector(db)
+    if not collector.api_key:
+        return
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    from_date = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    total = 0
+
+    for item in watchlist:
+        if item.get("etf"):
+            continue
+        try:
+            count = collector.collect_for_action(
+                item["name"], item["ticker"], from_date, today,
+            )
+            total += count
+            import time
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"Marketaux erreur {item['ticker']}: {e}")
+
+    logger.info(f"Marketaux: {total} news collectees")
+
+
+def collect_newsdata(db: Database, watchlist: list[dict]):
+    """Collecte news Newsdata.io pour les derniers jours."""
+    try:
+        from src.data_collection.newsdata_collector import NewsdataCollector
+    except Exception:
+        logger.warning("NewsdataCollector non disponible")
+        return
+
+    try:
+        collector = NewsdataCollector(db)
+    except ValueError:
+        logger.warning("NEWSDATA_API_KEY manquante")
+        return
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    from_date = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    total = 0
+
+    for item in watchlist:
+        if item.get("etf"):
+            continue
+        try:
+            count = collector.collect_for_action(
+                item["name"], item["ticker"], from_date, today,
+            )
+            total += count
+            import time
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"Newsdata erreur {item['ticker']}: {e}")
+
+    logger.info(f"Newsdata.io: {total} news collectees")
+
+
+def score_sentiment_llm(db: Database):
+    """Score le sentiment des news sans score via GPT-4o-mini (batch de 30)."""
+    try:
+        from src.analysis.llm_sentiment import LLMSentimentScorer
+        scorer = LLMSentimentScorer(db)
+        result = scorer.score_all_unscored(batch_size=30)
+        logger.info(
+            f"LLM Sentiment: {result['scored']}/{result['total']} scorees, "
+            f"{result['errors']} erreurs"
+        )
+    except Exception as e:
+        logger.error(f"LLM Sentiment erreur: {e}")
+
+
 def refresh_fundamentals(db: Database, watchlist: list[dict]):
     """Collecte les fondamentaux pour les tickers non-ETF."""
     from src.data_collection.fundamental_collector import FundamentalCollector
@@ -397,7 +504,54 @@ def run_scheduler(dry_run: bool = False):
         name="Refresh fondamentaux",
     )
 
-    # Job 5: Review J+3 — quotidien a 18h (lun-ven)
+    # Job 5: Alpha Vantage — quotidien (lun-ven)
+    scheduler.add_job(
+        collect_alpha_vantage, CronTrigger(
+            hour=sched_config.get("alpha_vantage_hour", 8),
+            minute=0,
+            day_of_week="mon-fri",
+        ),
+        args=[db, watchlist],
+        id="collect_alpha_vantage",
+        name="Alpha Vantage news",
+    )
+
+    # Job 6: Marketaux — quotidien (lun-ven)
+    scheduler.add_job(
+        collect_marketaux, CronTrigger(
+            hour=sched_config.get("marketaux_hour", 12),
+            minute=0,
+            day_of_week="mon-fri",
+        ),
+        args=[db, watchlist],
+        id="collect_marketaux",
+        name="Marketaux news",
+    )
+
+    # Job 7: Newsdata.io — quotidien (lun-ven)
+    scheduler.add_job(
+        collect_newsdata, CronTrigger(
+            hour=sched_config.get("newsdata_hour", 14),
+            minute=0,
+            day_of_week="mon-fri",
+        ),
+        args=[db, watchlist],
+        id="collect_newsdata",
+        name="Newsdata.io news",
+    )
+
+    # Job 8: LLM Sentiment — toutes les 2h (lun-ven 8h-19h)
+    scheduler.add_job(
+        score_sentiment_llm, IntervalTrigger(
+            minutes=sched_config.get("sentiment_interval_min", 120),
+            start_date="2026-01-01 08:00:00",
+        ),
+        args=[db],
+        id="score_sentiment",
+        name="LLM Sentiment scoring",
+    )
+
+    # Job 9: Review J+3 — quotidien a 18h (lun-ven)
     scheduler.add_job(
         run_daily_review,
         CronTrigger(
@@ -410,7 +564,7 @@ def run_scheduler(dry_run: bool = False):
         name="Review J+3",
     )
 
-    # Job 6: Update regles — quotidien a 18h30 (lun-ven)
+    # Job 10: Update regles — quotidien a 18h30 (lun-ven)
     scheduler.add_job(
         update_filter_rules,
         CronTrigger(
@@ -423,7 +577,7 @@ def run_scheduler(dry_run: bool = False):
         name="Update regles",
     )
 
-    # Job 7: Check retrain — dimanche 19h
+    # Job 11: Check retrain — dimanche 19h
     scheduler.add_job(
         check_retrain,
         CronTrigger(
@@ -436,7 +590,7 @@ def run_scheduler(dry_run: bool = False):
         name="Check retrain",
     )
 
-    # Job 8: Resume hebdo — dimanche 20h
+    # Job 12: Resume hebdo — dimanche 20h
     scheduler.add_job(
         send_weekly_summary,
         CronTrigger(
@@ -467,9 +621,13 @@ def run_scheduler(dry_run: bool = False):
     print(f"  Telegram: {'configure' if telegram else 'non configure'}")
     print(f"\nJobs programmes:")
     print(f"  - Prix: toutes les {sched_config.get('prices_interval_min', 2)} min")
-    print(f"  - News: toutes les {sched_config.get('news_interval_min', 10)} min")
+    print(f"  - News RSS: toutes les {sched_config.get('news_interval_min', 10)} min")
     print(f"  - Scoring: toutes les {sched_config.get('scoring_interval_min', 60)} min")
     print(f"  - Fondamentaux: quotidien a {sched_config.get('fundamentals_hour', 7)}h")
+    print(f"  - Alpha Vantage: quotidien a {sched_config.get('alpha_vantage_hour', 8)}h")
+    print(f"  - Marketaux: quotidien a {sched_config.get('marketaux_hour', 12)}h")
+    print(f"  - Newsdata.io: quotidien a {sched_config.get('newsdata_hour', 14)}h")
+    print(f"  - LLM Sentiment: toutes les {sched_config.get('sentiment_interval_min', 120)} min")
     print(f"  - Review J+3: quotidien a {feedback_config.get('review_hour', 18)}h")
     print(f"  - Update regles: quotidien a {feedback_config.get('rules_update_hour', 18)}h30")
     print(f"  - Check retrain: {feedback_config.get('retrain_day', 'dim')} a {feedback_config.get('retrain_hour', 19)}h")

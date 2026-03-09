@@ -40,7 +40,7 @@ class PerformanceTracker:
         - Win rate < 30% -> threshold + 0.02
         - Win rate 30-40% -> threshold + 0.01
         - Win rate >= 40% -> threshold unchanged
-        - Max 0.82 (cap pour garder du flux)
+        - Max base + 0.10 (cap pour garder du flux)
         """
         stats = self.db.get_review_stats()
         if stats["total"] < self.min_samples:
@@ -51,7 +51,8 @@ class PerformanceTracker:
             threshold += 0.02
         elif win_rate < 0.40:
             threshold += 0.01
-        return min(round(threshold, 2), 0.82)
+        max_threshold = round(self.base_threshold + 0.10, 2)
+        return min(round(threshold, 2), max_threshold)
 
     def generate_filter_rules(self) -> list[dict]:
         """Generate filter rules based on failure patterns.

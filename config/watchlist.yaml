@@ -98,15 +98,19 @@ watchlist:
 
 # Parametres du scanner
 scoring:
-  threshold: 0.75          # Score minimum pour alerte
+  threshold: 0.50          # Score bas volontairement: on envoie TOUT pour que le feedback loop apprenne
   cooldown_hours: 24       # Heures entre 2 alertes sur le meme ticker
   model_path: "data/models/nicolas_v1.joblib"
 
 scheduler:
   prices_interval_min: 2       # Refresh prix toutes les 2 min
-  news_interval_min: 10        # Collecte news toutes les 10 min
+  news_interval_min: 10        # Collecte news RSS toutes les 10 min
   scoring_interval_min: 60     # Scoring toutes les 60 min
   fundamentals_hour: 7         # Refresh fondamentaux a 7h
+  alpha_vantage_hour: 8        # Alpha Vantage news a 8h
+  marketaux_hour: 12           # Marketaux news a 12h
+  newsdata_hour: 14            # Newsdata.io news a 14h
+  sentiment_interval_min: 120  # Scoring LLM sentiment toutes les 2h
 
 market_hours:
   open: "09:00"

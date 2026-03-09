@@ -150,9 +150,9 @@ class TestAdaptiveThreshold:
         # 1/5 = 20% win rate -> +0.02
         assert self.tracker.compute_adaptive_threshold() == 0.77
 
-    def test_threshold_capped_at_082(self):
-        """Le seuil ne depasse jamais 0.82."""
-        tracker = PerformanceTracker(self.db, base_threshold=0.81, min_samples=5)
+    def test_threshold_capped_at_base_plus_010(self):
+        """Le seuil ne depasse jamais base + 0.10."""
+        tracker = PerformanceTracker(self.db, base_threshold=0.75, min_samples=5)
         _seed_reviews(self.db, [
             ("MC.PA", "LOSS", -5.0, "EARNINGS", 0.85),
             ("BN.PA", "LOSS", -2.0, "EARNINGS", 0.80),
@@ -160,8 +160,8 @@ class TestAdaptiveThreshold:
             ("OR.PA", "LOSS", -1.0, "UPGRADE", 0.82),
             ("SAN.PA", "LOSS", -3.0, "CONTRAT", 0.76),
         ])
-        # 0/5 = 0% -> 0.81 + 0.02 = 0.83, capped at 0.82
-        assert tracker.compute_adaptive_threshold() == 0.82
+        # 0/5 = 0% -> 0.75 + 0.02 = 0.77, cap at 0.85, so 0.77
+        assert tracker.compute_adaptive_threshold() == 0.77
 
     def test_35_percent_win_rate_threshold(self):
         """Win rate 30-40% augmente le seuil de 0.01."""
