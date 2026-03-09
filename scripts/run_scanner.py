@@ -277,6 +277,18 @@ def send_weekly_summary(db, config, telegram, dry_run):
     logger.info("Resume hebdomadaire envoye")
 
 
+def collect_orderbook(db: Database, watchlist: list[dict]):
+    """Collecte les carnets d'ordres Boursorama pour la watchlist."""
+    from src.data_collection.orderbook_collector import OrderBookCollector
+
+    collector = OrderBookCollector(db)
+    result = collector.collect_all_watchlist(watchlist)
+    logger.info(
+        f"Orderbook: {result['collected']} collectes, "
+        f"{result['errors']} erreurs"
+    )
+
+
 def score_and_alert(predictor: Predictor, signal_filter: SignalFilter,
                     formatter: AlertFormatter, telegram: TelegramBot | None,
                     watchlist: list[dict], dry_run: bool = False):
@@ -603,6 +615,17 @@ def run_scheduler(dry_run: bool = False):
         name="Resume hebdomadaire",
     )
 
+    # Job 13: Carnet d'ordres — toutes les 15 min (lun-ven 9h-17h35)
+    scheduler.add_job(
+        collect_orderbook, IntervalTrigger(
+            minutes=sched_config.get("orderbook_interval_min", 15),
+            start_date="2026-01-01 09:00:00",
+        ),
+        args=[db, watchlist],
+        id="collect_orderbook",
+        name="Carnet d'ordres",
+    )
+
     # Graceful shutdown
     def shutdown(signum, frame):
         logger.info("Arret du scanner...")
@@ -632,6 +655,7 @@ def run_scheduler(dry_run: bool = False):
     print(f"  - Update regles: quotidien a {feedback_config.get('rules_update_hour', 18)}h30")
     print(f"  - Check retrain: {feedback_config.get('retrain_day', 'dim')} a {feedback_config.get('retrain_hour', 19)}h")
     print(f"  - Resume hebdo: {feedback_config.get('weekly_day', 'dim')} a {feedback_config.get('weekly_hour', 20)}h")
+    print(f"  - Carnet d'ordres: toutes les {sched_config.get('orderbook_interval_min', 15)} min")
     print(f"\nCtrl+C pour arreter\n")
 
     scheduler.start()

@@ -111,6 +111,7 @@ scheduler:
   marketaux_hour: 12           # Marketaux news a 12h
   newsdata_hour: 14            # Newsdata.io news a 14h
   sentiment_interval_min: 120  # Scoring LLM sentiment toutes les 2h
+  orderbook_interval_min: 15   # Carnet d'ordres toutes les 15 min
 
 market_hours:
   open: "09:00"
@@ -128,4 +129,4 @@ feedback:
   retrain_day: "sun"        # Check retrain le dimanche
   retrain_hour: 19          # A 19h
   win_threshold: 4.5        # % pour considerer un WIN
-  min_reviews_retrain: 50   # Reviews minimum pour retrain
+  min_reviews_retrain: 20   # Reviews minimum pour retrain

@@ -1,5 +1,6 @@
 """Tests pour le feature engine — assemblage du vecteur de features par trade."""
 
+import json
 import os
 import tempfile
 
@@ -145,12 +146,12 @@ class TestBuildTradeFeatures:
         assert "previous_win_rate" in result
 
     def test_build_has_target(self):
-        """Le dict contient la target is_winner."""
+        """Le dict contient la target is_winner (seuil 4.5%)."""
         trades = self.db.get_all_trades()
-        # Trade 1: gagnant (+5.26%)
+        # Trade 1: +5.26% >= 4.5% -> winner
         result = self.engine.build_trade_features(trades[0])
         assert result["is_winner"] == 1
-        # Trade 2: perdant (-3%)
+        # Trade 2: -3% < 4.5% -> loser
         result = self.engine.build_trade_features(trades[1])
         assert result["is_winner"] == 0
 
@@ -329,3 +330,178 @@ class TestBuildAllFeatures:
         assert "trade_id" not in names
         assert "rsi_14" in names
         assert "catalyst_type" in names
+        assert "bid_ask_volume_ratio" in names
+
+
+class TestBuildCombinedFeatures:
+    """Tests pour build_combined_features (apprentissage continu)."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+        _seed_test_db(self.db)
+        self.engine = FeatureEngine(self.db)
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def _insert_review(self, signal_id, ticker, outcome, features_json,
+                       signal_date="2026-03-01"):
+        """Helper pour inserer un signal + review."""
+        self.db.insert_signal({
+            "ticker": ticker,
+            "date": signal_date,
+            "score": 0.80,
+            "signal_price": 10.0,
+            "sent_at": f"{signal_date} 10:00:00",
+        })
+        self.db.insert_signal_review({
+            "signal_id": signal_id,
+            "ticker": ticker,
+            "signal_date": signal_date,
+            "signal_price": 10.0,
+            "review_date": "2026-03-04",
+            "review_price": 10.5,
+            "performance_pct": 5.0,
+            "outcome": outcome,
+            "failure_reason": None,
+            "catalyst_type": "EARNINGS",
+            "features_json": features_json,
+            "reviewed_at": "2026-03-04 18:00:00",
+        })
+
+    def test_build_combined_includes_trades_and_reviews(self):
+        """Le DataFrame combine contient trades historiques + reviews."""
+        features = {"rsi_14": 40.0, "catalyst_type": "EARNINGS"}
+        self._insert_review(1, "SAN.PA", "WIN", json.dumps(features))
+        result = self.engine.build_combined_features()
+        # 2 trades + 1 review = 3
+        assert len(result) == 3
+
+    def test_combined_target_threshold_4_5(self):
+        """Trades < 4.5% rendement -> is_winner=0."""
+        result = self.engine.build_combined_features()
+        # Trade 1: +5.26% -> 1, Trade 2: -3% -> 0
+        trade1 = result[result["trade_id"] == 1].iloc[0]
+        trade2 = result[result["trade_id"] == 2].iloc[0]
+        assert trade1["is_winner"] == 1
+        assert trade2["is_winner"] == 0
+
+    def test_combined_review_win_is_winner_1(self):
+        """Review WIN -> is_winner=1."""
+        features = {"rsi_14": 40.0}
+        self._insert_review(1, "SAN.PA", "WIN", json.dumps(features))
+        result = self.engine.build_combined_features()
+        review_row = result[result["trade_id"] == -1].iloc[0]
+        assert review_row["is_winner"] == 1
+
+    def test_combined_review_loss_is_winner_0(self):
+        """Review LOSS -> is_winner=0."""
+        features = {"rsi_14": 60.0}
+        self._insert_review(1, "SAN.PA", "LOSS", json.dumps(features),
+                            signal_date="2026-03-02")
+        result = self.engine.build_combined_features()
+        review_row = result[result["trade_id"] == -1].iloc[0]
+        assert review_row["is_winner"] == 0
+
+    def test_combined_review_neutral_is_winner_0(self):
+        """Review NEUTRAL -> is_winner=0."""
+        features = {"rsi_14": 50.0}
+        self._insert_review(1, "SAN.PA", "NEUTRAL", json.dumps(features),
+                            signal_date="2026-03-03")
+        result = self.engine.build_combined_features()
+        review_row = result[result["trade_id"] == -1].iloc[0]
+        assert review_row["is_winner"] == 0
+
+    def test_combined_skips_null_features_json(self):
+        """Reviews sans features_json sont ignorees."""
+        self._insert_review(1, "SAN.PA", "WIN", None)
+        result = self.engine.build_combined_features()
+        # Seulement les 2 trades, pas la review sans features
+        assert len(result) == 2
+
+    def test_combined_has_date_achat_for_walk_forward(self):
+        """Les reviews ont date_achat = signal_date pour le walk-forward."""
+        features = {"rsi_14": 40.0}
+        self._insert_review(1, "SAN.PA", "WIN", json.dumps(features),
+                            signal_date="2026-03-05")
+        result = self.engine.build_combined_features()
+        review_row = result[result["trade_id"] == -1].iloc[0]
+        assert review_row["date_achat"] == "2026-03-05"
+
+    def test_combined_negative_trade_id_for_reviews(self):
+        """Les reviews ont trade_id negatif (-signal_id)."""
+        features = {"rsi_14": 40.0}
+        self._insert_review(1, "SAN.PA", "WIN", json.dumps(features))
+        result = self.engine.build_combined_features()
+        review_ids = result[result["trade_id"] < 0]["trade_id"].tolist()
+        assert len(review_ids) == 1
+        assert review_ids[0] == -1
+
+
+class TestOrderbookFeatures:
+    """Tests pour les features du carnet d'ordres."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+        _seed_test_db(self.db)
+        self.engine = FeatureEngine(self.db)
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_build_has_orderbook_features(self):
+        """Les features temps reel contiennent les features orderbook."""
+        result = self.engine.build_realtime_features("SAN.PA", 98.0, "2025-08-15")
+        assert "bid_ask_volume_ratio" in result
+        assert "spread_pct" in result
+        assert "bid_depth_concentration" in result
+        assert "bid_ask_order_ratio" in result
+
+    def test_orderbook_features_default_no_data(self):
+        """Sans snapshot orderbook, les features sont a 0.0."""
+        result = self.engine._build_orderbook_features("SAN.PA")
+        assert result["bid_ask_volume_ratio"] == 0.0
+        assert result["spread_pct"] == 0.0
+        assert result["bid_depth_concentration"] == 0.0
+        assert result["bid_ask_order_ratio"] == 0.0
+
+    def test_orderbook_features_with_data(self):
+        """Avec un snapshot, les features sont calculees."""
+        raw_data = {
+            "bids": [
+                {"price": 10.0, "quantity": 500, "orders": 3},
+                {"price": 9.9, "quantity": 300, "orders": 2},
+                {"price": 9.8, "quantity": 200, "orders": 1},
+                {"price": 9.7, "quantity": 100, "orders": 1},
+                {"price": 9.6, "quantity": 50, "orders": 1},
+            ],
+            "asks": [
+                {"price": 10.1, "quantity": 400, "orders": 2},
+                {"price": 10.2, "quantity": 200, "orders": 1},
+                {"price": 10.3, "quantity": 100, "orders": 1},
+            ],
+        }
+        self.db.insert_orderbook_snapshot({
+            "ticker": "SAN.PA",
+            "snapshot_time": "2025-08-15 10:00:00",
+            "best_bid": 10.0,
+            "best_ask": 10.1,
+            "bid_volume_total": 1150,
+            "ask_volume_total": 700,
+            "bid_orders_total": 8,
+            "ask_orders_total": 4,
+            "spread_pct": 1.0,
+            "bid_ask_volume_ratio": 1.6429,
+            "raw_json": json.dumps(raw_data),
+        })
+        result = self.engine._build_orderbook_features("SAN.PA")
+        assert result["bid_ask_volume_ratio"] == 1.6429
+        assert result["spread_pct"] == 1.0
+        assert result["bid_ask_order_ratio"] == 2.0  # 8/4
+        assert result["bid_depth_concentration"] > 0

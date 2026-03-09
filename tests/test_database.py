@@ -28,6 +28,7 @@ def test_database_creates_tables():
         assert "signal_reviews" in tables
         assert "filter_rules" in tables
         assert "model_versions" in tables
+        assert "orderbook_snapshots" in tables
 
 
 def test_database_insert_execution():
@@ -1043,3 +1044,59 @@ class TestTradeAnalysesLLM:
         results = self.db.get_all_trade_analyses()
         assert len(results) == 1
         assert results[0]["trade_id"] == 1
+
+
+class TestOrderbookSnapshots:
+    """Tests CRUD pour la table orderbook_snapshots."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_insert_orderbook_snapshot(self):
+        """Insere un snapshot et le recupere."""
+        snapshot = {
+            "ticker": "SAN.PA",
+            "snapshot_time": "2026-03-09 10:00:00",
+            "best_bid": 95.0,
+            "best_ask": 95.2,
+            "bid_volume_total": 5000,
+            "ask_volume_total": 3000,
+            "bid_orders_total": 15,
+            "ask_orders_total": 10,
+            "spread_pct": 0.21,
+            "bid_ask_volume_ratio": 1.67,
+            "raw_json": '{"bids":[],"asks":[]}',
+        }
+        self.db.insert_orderbook_snapshot(snapshot)
+        result = self.db.get_latest_orderbook("SAN.PA")
+        assert result is not None
+        assert result["ticker"] == "SAN.PA"
+        assert result["best_bid"] == 95.0
+        assert result["spread_pct"] == 0.21
+
+    def test_get_latest_orderbook(self):
+        """Retourne le snapshot le plus recent."""
+        self.db.insert_orderbook_snapshot({
+            "ticker": "SAN.PA",
+            "snapshot_time": "2026-03-09 09:00:00",
+            "best_bid": 94.0,
+        })
+        self.db.insert_orderbook_snapshot({
+            "ticker": "SAN.PA",
+            "snapshot_time": "2026-03-09 10:00:00",
+            "best_bid": 95.0,
+        })
+        result = self.db.get_latest_orderbook("SAN.PA")
+        assert result["best_bid"] == 95.0
+        assert result["snapshot_time"] == "2026-03-09 10:00:00"
+
+    def test_get_latest_orderbook_none(self):
+        """Retourne None si aucun snapshot."""
+        result = self.db.get_latest_orderbook("UNKNOWN.PA")
+        assert result is None

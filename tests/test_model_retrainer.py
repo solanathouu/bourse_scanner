@@ -1,7 +1,9 @@
 """Tests pour ModelRetrainer."""
 
+import json
 import os
 import tempfile
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -311,3 +313,106 @@ class TestFormatReport:
         }
         report = self.retrainer.format_retrain_report(result)
         assert "/tmp/my_backup.joblib" in report
+
+
+class TestCombinedFeatures:
+    """Tests pour l'integration build_combined_features dans le retrain."""
+
+    def setup_method(self):
+        """Cree une base temporaire."""
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+
+    def test_retrain_uses_combined_features(self):
+        """retrain_with_validation appelle build_combined_features (pas build_all_features)."""
+        import src.feedback.model_retrainer as retrainer_mod
+
+        # Verify the source code references build_combined_features
+        import inspect
+        source = inspect.getsource(retrainer_mod.ModelRetrainer.retrain_with_validation)
+        assert "build_combined_features" in source
+        assert "build_all_features" not in source
+
+    def test_should_retrain_threshold_20(self):
+        """Le seuil par defaut est 20 reviews."""
+        retrainer = ModelRetrainer(self.db)
+        assert retrainer.min_reviews == 20
+
+        # Insert 20 signals + reviews
+        for i in range(20):
+            self.db.insert_signal({
+                "ticker": f"T{i}.PA",
+                "date": f"2026-01-{(i % 28) + 1:02d}",
+                "score": 0.8,
+                "signal_price": 10.0,
+            })
+            self.db.insert_signal_review({
+                "signal_id": i + 1,
+                "ticker": f"T{i}.PA",
+                "signal_date": f"2026-01-{(i % 28) + 1:02d}",
+                "signal_price": 10.0,
+                "review_date": f"2026-02-{(i % 28) + 1:02d}",
+                "review_price": 10.5,
+                "performance_pct": 5.0,
+                "outcome": "WIN",
+                "failure_reason": None,
+                "catalyst_type": "EARNINGS",
+                "features_json": None,
+                "reviewed_at": "2026-02-15 10:00:00",
+            })
+
+        assert retrainer.should_retrain() is True
+
+    def test_retrain_with_reviews_data(self):
+        """build_combined_features integre les reviews dans le dataset."""
+        from src.analysis.feature_engine import FeatureEngine
+        import numpy as np
+
+        # Seed trades + prix pour que build_all_features fonctionne
+        self.db.insert_trades_batch([
+            {
+                "isin": "FR0000120578", "nom_action": "SANOFI",
+                "date_achat": "2025-07-10", "date_vente": "2025-07-20",
+                "prix_achat": 95.0, "prix_vente": 100.0, "quantite": 10,
+                "rendement_brut_pct": 5.26, "rendement_net_pct": 5.0,
+                "duree_jours": 10, "frais_totaux": 2.5, "statut": "CLOTURE",
+            },
+        ])
+
+        # Insert prix pour que les features techniques marchent
+        import pandas as pd
+        np.random.seed(42)
+        dates = pd.bdate_range("2025-05-01", "2025-09-15")
+        for d in dates:
+            self.db.insert_price({
+                "ticker": "SAN.PA",
+                "date": d.strftime("%Y-%m-%d"),
+                "open": 95.0, "high": 97.0, "low": 94.0,
+                "close": 96.0, "volume": 100000,
+            })
+
+        # Insert review avec features_json
+        self.db.insert_signal({
+            "ticker": "SAN.PA", "date": "2026-03-01",
+            "score": 0.80, "signal_price": 96.0,
+            "sent_at": "2026-03-01 10:00:00",
+        })
+        review_features = {"rsi_14": 45.0, "catalyst_type": "EARNINGS"}
+        self.db.insert_signal_review({
+            "signal_id": 1, "ticker": "SAN.PA",
+            "signal_date": "2026-03-01", "signal_price": 96.0,
+            "review_date": "2026-03-04", "review_price": 100.0,
+            "performance_pct": 5.0, "outcome": "WIN",
+            "failure_reason": None, "catalyst_type": "EARNINGS",
+            "features_json": json.dumps(review_features),
+            "reviewed_at": "2026-03-04 18:00:00",
+        })
+
+        engine = FeatureEngine(self.db)
+        combined = engine.build_combined_features()
+        # 1 trade + 1 review = 2 rows
+        assert len(combined) == 2
+        # Review has negative trade_id
+        assert (combined["trade_id"] == -1).any()

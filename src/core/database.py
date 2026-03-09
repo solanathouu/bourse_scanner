@@ -226,6 +226,27 @@ class Database:
             );
         """)
 
+        # Table orderbook_snapshots (carnet d'ordres Boursorama)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS orderbook_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                snapshot_time TEXT NOT NULL,
+                best_bid REAL,
+                best_ask REAL,
+                bid_volume_total INTEGER,
+                ask_volume_total INTEGER,
+                bid_orders_total INTEGER,
+                ask_orders_total INTEGER,
+                spread_pct REAL,
+                bid_ask_volume_ratio REAL,
+                raw_json TEXT,
+                UNIQUE(ticker, snapshot_time)
+            );
+            CREATE INDEX IF NOT EXISTS idx_orderbook_ticker_time
+                ON orderbook_snapshots(ticker, snapshot_time);
+        """)
+
         conn.close()
         logger.info(f"Base de données initialisée: {self.db_path}")
 
@@ -856,3 +877,68 @@ class Database:
         )
         conn.commit()
         conn.close()
+
+    # --- Order Book Snapshots ---
+
+    def insert_orderbook_snapshot(self, snapshot: dict):
+        """Insere un snapshot du carnet d'ordres. Ignore les doublons."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT OR IGNORE INTO orderbook_snapshots
+                (ticker, snapshot_time, best_bid, best_ask,
+                 bid_volume_total, ask_volume_total,
+                 bid_orders_total, ask_orders_total,
+                 spread_pct, bid_ask_volume_ratio, raw_json)
+            VALUES
+                (:ticker, :snapshot_time, :best_bid, :best_ask,
+                 :bid_volume_total, :ask_volume_total,
+                 :bid_orders_total, :ask_orders_total,
+                 :spread_pct, :bid_ask_volume_ratio, :raw_json)
+        """, {
+            "best_bid": None, "best_ask": None,
+            "bid_volume_total": None, "ask_volume_total": None,
+            "bid_orders_total": None, "ask_orders_total": None,
+            "spread_pct": None, "bid_ask_volume_ratio": None,
+            "raw_json": None,
+            **snapshot,
+        })
+        conn.commit()
+        conn.close()
+
+    def insert_orderbook_batch(self, snapshots: list[dict]):
+        """Insere plusieurs snapshots en batch. Ignore les doublons."""
+        enriched = [
+            {"best_bid": None, "best_ask": None,
+             "bid_volume_total": None, "ask_volume_total": None,
+             "bid_orders_total": None, "ask_orders_total": None,
+             "spread_pct": None, "bid_ask_volume_ratio": None,
+             "raw_json": None, **s}
+            for s in snapshots
+        ]
+        conn = self._connect()
+        conn.executemany("""
+            INSERT OR IGNORE INTO orderbook_snapshots
+                (ticker, snapshot_time, best_bid, best_ask,
+                 bid_volume_total, ask_volume_total,
+                 bid_orders_total, ask_orders_total,
+                 spread_pct, bid_ask_volume_ratio, raw_json)
+            VALUES
+                (:ticker, :snapshot_time, :best_bid, :best_ask,
+                 :bid_volume_total, :ask_volume_total,
+                 :bid_orders_total, :ask_orders_total,
+                 :spread_pct, :bid_ask_volume_ratio, :raw_json)
+        """, enriched)
+        conn.commit()
+        conn.close()
+        logger.info(f"{len(snapshots)} orderbook snapshots inseres en batch")
+
+    def get_latest_orderbook(self, ticker: str) -> dict | None:
+        """Recupere le dernier snapshot du carnet d'ordres pour un ticker."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM orderbook_snapshots WHERE ticker = ? "
+            "ORDER BY snapshot_time DESC LIMIT 1",
+            (ticker,),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None

@@ -4,6 +4,7 @@ Combine les indicateurs techniques (au moment de l'achat), le type de
 catalyseur, les donnees fondamentales, et le contexte personnel.
 """
 
+import json
 from datetime import datetime
 
 import pandas as pd
@@ -41,6 +42,12 @@ FUNDAMENTAL_FEATURES = [
 CONTEXT_FEATURES = [
     "day_of_week", "nb_previous_trades",
     "previous_win_rate", "days_since_last_trade",
+]
+
+# Colonnes de features carnet d'ordres
+ORDERBOOK_FEATURES = [
+    "bid_ask_volume_ratio", "bid_ask_order_ratio",
+    "spread_pct", "bid_depth_concentration",
 ]
 
 RECOMMENDATION_SCORES = {
@@ -240,8 +247,11 @@ class FeatureEngine:
         # Features contexte
         ctx_features = self._build_context_features(trade, all_trades)
 
-        # Target
-        is_winner = 1 if trade["rendement_brut_pct"] > 0 else 0
+        # Features carnet d'ordres (0 pour trades historiques, pas de data)
+        ob_features = self._build_orderbook_features(ticker)
+
+        # Target: seuil 4.5% aligne avec le seuil WIN des signal reviews
+        is_winner = 1 if trade["rendement_brut_pct"] >= 4.5 else 0
 
         # Assembler
         features = {
@@ -251,6 +261,7 @@ class FeatureEngine:
             **cat_features,
             **fund_features,
             **ctx_features,
+            **ob_features,
             "is_winner": is_winner,
         }
 
@@ -283,6 +294,58 @@ class FeatureEngine:
         df = pd.DataFrame(rows)
         logger.info(f"Matrice de features: {len(df)} lignes x {len(df.columns)} colonnes")
         return df
+
+    def build_combined_features(self) -> pd.DataFrame:
+        """Combine trades historiques + signal reviews pour l'entrainement.
+
+        Les signal reviews avec features_json sont converties en lignes
+        d'entrainement. Cela permet au modele d'apprendre de ses propres signaux.
+        """
+        # 1. Trades historiques
+        trades_df = self.build_all_features()
+
+        # 2. Signal reviews
+        reviews = self.db.get_signal_reviews()
+        review_rows = []
+
+        for review in reviews:
+            features_json = review.get("features_json")
+            if not features_json:
+                continue
+
+            try:
+                features = json.loads(features_json)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(
+                    f"features_json invalide pour review signal_id={review.get('signal_id')}"
+                )
+                continue
+
+            outcome = review.get("outcome", "NEUTRAL")
+            is_winner = 1 if outcome == "WIN" else 0
+
+            features["is_winner"] = is_winner
+            features["date_achat"] = review.get("signal_date", "")
+            features["trade_id"] = -review.get("signal_id", 0)
+            review_rows.append(features)
+
+        if not review_rows:
+            logger.info("Aucune signal review avec features, retour trades seuls")
+            return trades_df
+
+        reviews_df = pd.DataFrame(review_rows)
+        combined = pd.concat([trades_df, reviews_df], ignore_index=True)
+        combined = combined.fillna(0)
+
+        n_trades = len(trades_df)
+        n_reviews = len(reviews_df)
+        n_winners = int((combined["is_winner"] == 1).sum())
+        n_losers = len(combined) - n_winners
+        logger.info(
+            f"Dataset combine: {n_trades} trades + {n_reviews} reviews "
+            f"= {len(combined)} samples ({n_winners} winners, {n_losers} losers)"
+        )
+        return combined
 
     def build_realtime_features(self, ticker: str, current_price: float,
                                    date: str | None = None) -> dict | None:
@@ -332,11 +395,15 @@ class FeatureEngine:
         # Features contexte
         ctx_features = self._build_realtime_context_features(ticker, date)
 
+        # Features carnet d'ordres
+        ob_features = self._build_orderbook_features(ticker)
+
         return {
             **tech_features,
             **cat_features,
             **fund_features,
             **ctx_features,
+            **ob_features,
         }
 
     def _build_realtime_catalyst_features(self, ticker: str, date: str) -> dict:
@@ -419,7 +486,48 @@ class FeatureEngine:
             "days_since_last_trade": days_since,
         }
 
+    def _build_orderbook_features(self, ticker: str) -> dict:
+        """Construit les features du carnet d'ordres.
+
+        Utilise le dernier snapshot en BDD. Retourne des zeros si aucun snapshot.
+        """
+        default = {f: 0.0 for f in ORDERBOOK_FEATURES}
+
+        snapshot = self.db.get_latest_orderbook(ticker)
+        if snapshot is None:
+            return default
+
+        bid_orders = snapshot.get("bid_orders_total") or 0
+        ask_orders = snapshot.get("ask_orders_total") or 0
+        bid_ask_order_ratio = 0.0
+        if ask_orders > 0:
+            bid_ask_order_ratio = round(bid_orders / ask_orders, 4)
+
+        # Concentration top 3 depuis raw_json
+        bid_depth_concentration = 0.0
+        raw = snapshot.get("raw_json")
+        if raw:
+            try:
+                data = json.loads(raw)
+                bids = data.get("bids", [])
+                vols = [b.get("quantity", 0) or 0 for b in bids]
+                total = sum(vols)
+                if total > 0 and len(vols) >= 3:
+                    bid_depth_concentration = round(sum(vols[:3]) / total, 4)
+                elif total > 0:
+                    bid_depth_concentration = 1.0
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return {
+            "bid_ask_volume_ratio": snapshot.get("bid_ask_volume_ratio") or 0.0,
+            "bid_ask_order_ratio": bid_ask_order_ratio,
+            "spread_pct": snapshot.get("spread_pct") or 0.0,
+            "bid_depth_concentration": bid_depth_concentration,
+        }
+
     def get_feature_names(self) -> list[str]:
         """Liste ordonnee des noms de features (sans target ni trade_id)."""
         return (TECHNICAL_FEATURES + CATALYST_FEATURES
-                + FUNDAMENTAL_FEATURES + CONTEXT_FEATURES)
+                + FUNDAMENTAL_FEATURES + CONTEXT_FEATURES
+                + ORDERBOOK_FEATURES)

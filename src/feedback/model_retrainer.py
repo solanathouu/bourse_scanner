@@ -15,7 +15,7 @@ from src.core.database import Database
 class ModelRetrainer:
     """Gere le re-entrainement du modele avec validation."""
 
-    def __init__(self, db: Database, min_reviews_for_retrain: int = 50):
+    def __init__(self, db: Database, min_reviews_for_retrain: int = 20):
         self.db = db
         self.min_reviews = min_reviews_for_retrain
 
@@ -50,7 +50,7 @@ class ModelRetrainer:
         old_trainer.load_model(current_model_path)
 
         engine = FeatureEngine(self.db)
-        features_df = engine.build_all_features()
+        features_df = engine.build_combined_features()
 
         if len(features_df) < 20:
             return {"deployed": False, "reason": "not_enough_data"}

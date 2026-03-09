@@ -5,7 +5,7 @@ Bot Python de veille boursiere PEA. Analyse des donnees marche en temps reel, co
 ## Commandes
 
 ```bash
-uv run pytest tests/ -v          # Lancer tous les tests (379 tests)
+uv run pytest tests/ -v          # Lancer tous les tests (404 tests)
 uv run pytest tests/ -v -x       # Stopper au premier echec
 uv run python scripts/init_db.py       # Initialiser la base SQLite
 uv run python scripts/import_pdfs.py   # Importer les PDF dans la base
@@ -106,7 +106,7 @@ core (fondation, 0 deps internes)
 
 ## Base de donnees
 
-SQLite dans `data/trades.db`. Tables principales (11 tables):
+SQLite dans `data/trades.db`. Tables principales (12 tables):
 
 - `executions` — Avis d'execution PDF parses (1 ligne = 1 PDF)
 - `trades_complets` — Trades reconstitues achat->vente (FIFO)
@@ -119,6 +119,7 @@ SQLite dans `data/trades.db`. Tables principales (11 tables):
 - `signal_reviews` — Reviews J+3 des signaux (performance, outcome WIN/LOSS/NEUTRAL, failure_reason)
 - `filter_rules` — Regles de filtrage adaptatives generees par le feedback loop
 - `model_versions` — Historique des versions du modele (metriques, is_active)
+- `orderbook_snapshots` — Snapshots carnet d'ordres Boursorama (bid/ask, volumes, spread, ratio)
 
 ## Etapes d'implementation
 
@@ -140,7 +141,7 @@ SQLite dans `data/trades.db`. Tables principales (11 tables):
 |--------|--------|---------|
 | Code | Etape 1-7 DONE + feedback debrided | Filtrage adaptatif remplace par CATALYST_STATS informatif (plus de blocage). 12 jobs scheduler (4 nouvelles sources). Seuil 0.50 pour maximiser les signaux et le feedback. |
 | Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + OPENAI_API_KEY + NEWSDATA_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
-| Tests | 379/379 PASS | database(56), pdf_parser(17), trade_matcher(7), ticker_mapper(11), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(26), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6), predictor(10), signal_filter(13), formatter(7), telegram_bot(4), signal_reviewer(32), performance_tracker(29), model_retrainer(22) |
+| Tests | 404/404 PASS | database(59), pdf_parser(17), trade_matcher(7), ticker_mapper(11), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(37), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6), predictor(10), signal_filter(13), formatter(7), telegram_bot(4), signal_reviewer(32), performance_tracker(29), model_retrainer(25), orderbook_collector(8) |
 | Data | Collectee + LLM analysee + enrichie + 97 reviews | 214 exec, 166 trades, 1357+ prix, 1824+ news, 649 catalyseurs, 141 analyses LLM, 97 signal reviews |
 | Docs | Design + plans Etapes 2-5 | docs/plans/2026-02-22-etape*-*.md, 2026-02-23-etape4-*.md, 2026-02-24-etape4-llm-*.md |
 | Git | Pushe sur origin | 30+ commits, master a jour |
@@ -158,6 +159,7 @@ SQLite dans `data/trades.db`. Tables principales (11 tables):
 | Boursorama (delistes) | boursorama_scraper.py | prix | - | Non |
 | yfinance fondamentaux | fundamental_collector.py | PE/PB/analysts | - | Non |
 | LLM Sentiment | llm_sentiment.py | scorer ~1081 news | GPT-4o-mini | Oui (.env) |
+| Boursorama Orderbook | orderbook_collector.py | carnet d'ordres | - | Non |
 
 **Tickers sans prix yfinance (delistes, fallback Boursorama):** 2CRSI.PA, ALTBG.PA, AFYREN.PA
 
@@ -206,21 +208,24 @@ L'etape 4 (Feature Engineering + ML) doit:
 4. **Seuil adaptatif adouci**: +0.02 si WR<30%, +0.01 si WR<40%, cap base+0.10 (etait +0.04/+0.02, cap 0.95).
 5. **Fix retrain**: `date_achat` ajoute au vecteur de features pour le walk-forward split.
 
-**Limitation connue**: Le retrain utilise toujours les 111 trades historiques. Les 97+ signal reviews ne sont PAS encore incorporees dans les donnees d'entrainement. C'est la prochaine evolution majeure.
+6. **Apprentissage continu**: `build_combined_features()` fusionne trades historiques + signal reviews. Seuil is_winner harmonise a 4.5% (etait > 0). min_reviews_retrain abaisse a 20.
+7. **Carnet d'ordres**: OrderBookCollector scrape Boursorama (31 symboles). 4 features: bid_ask_volume_ratio, bid_ask_order_ratio, spread_pct, bid_depth_concentration. Job 13 toutes les 15 min.
+8. **12 tables** en BDD (ajout: orderbook_snapshots). 404 tests.
 
 ## Next Immediate Action
 
-**Monitorer les signaux avec la nouvelle config.** Le bot tourne sur le VPS avec 12 jobs, seuil 0.50.
+**Deployer sur le VPS et re-entrainer le modele.**
 
 Actions immediates:
-1. **Verifier** que les 4 nouvelles sources collectent bien des donnees sur le VPS
-2. **Monitorer** les alertes Telegram — on devrait recevoir beaucoup plus de signaux
-3. **Observer** les reviews J+3 (37 reviews en attente, en attente des prix)
+1. **Push** le code vers GitHub et pull sur le VPS
+2. **Re-entrainer** le modele avec `uv run python scripts/train_model.py` — le nouveau seuil 4.5% va equilibrer le dataset (~60/55 au lieu de ~102/13)
+3. **Redemarrer** le scanner sur le VPS (13 jobs maintenant)
+4. **Tester** le scraping orderbook live: `uv run python -c "from src.data_collection.orderbook_collector import OrderBookCollector; from src.core.database import Database; db = Database('data/trades.db'); c = OrderBookCollector(db); r = c.collect_orderbook('DBV.PA'); print(r)"`
 
 Prochaines evolutions:
-1. **PRIORITE**: Incorporer les signal_reviews dans les donnees d'entrainement du modele (actuellement seuls les 111 trades historiques sont utilises)
-2. **Attendre 50+ reviews** avec la nouvelle config pour evaluer la qualite
-3. **Ameliorer** le modele quand on aura assez de donnees negatives
+1. **Attendre 20+ reviews** avec la nouvelle config pour triggerer un retrain automatique
+2. **Evaluer** l'impact du carnet d'ordres sur les features apres accumulation de donnees
+3. **Ameliorer** le parsing Boursorama si le format HTML change
 
 ## Donnees cles du trading
 
