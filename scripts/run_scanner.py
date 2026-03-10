@@ -33,6 +33,11 @@ load_dotenv()
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "trades.db")
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "watchlist.yaml")
+LOG_PATH = os.path.join(os.path.dirname(__file__), "..", "logs", "scanner.log")
+
+# Ajouter un sink fichier pour persister les logs
+os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+logger.add(LOG_PATH, rotation="10 MB", retention="7 days", level="INFO")
 
 
 def load_config() -> dict:

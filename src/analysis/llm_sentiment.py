@@ -96,8 +96,12 @@ class LLMSentimentScorer:
 
         return False
 
-    def score_all_unscored(self, batch_size: int = 20) -> dict:
+    def score_all_unscored(self, batch_size: int = 20,
+                           max_consecutive_errors: int = 5) -> dict:
         """Score toutes les news sans sentiment, par lots.
+
+        S'arrete automatiquement apres max_consecutive_errors erreurs
+        consecutives (ex: cle API invalide, quota depasse).
 
         Returns:
             Dict {"total": int, "scored": int, "errors": int}.
@@ -113,17 +117,28 @@ class LLMSentimentScorer:
 
         scored = 0
         errors = 0
+        consecutive_errors = 0
 
         for i, news in enumerate(unscored):
             try:
                 success = self.score_news(news)
                 if success:
                     scored += 1
+                    consecutive_errors = 0
                 else:
                     errors += 1
+                    consecutive_errors += 1
             except Exception as e:
                 logger.error(f"Erreur scoring news #{news['id']}: {e}")
                 errors += 1
+                consecutive_errors += 1
+
+            if consecutive_errors >= max_consecutive_errors:
+                logger.warning(
+                    f"Arret apres {max_consecutive_errors} erreurs consecutives "
+                    f"({scored} OK, {errors} erreurs sur {i + 1} tentatives)"
+                )
+                break
 
             if (i + 1) % batch_size == 0:
                 logger.info(f"  Progress: {i + 1}/{total} ({scored} OK, {errors} erreurs)")
