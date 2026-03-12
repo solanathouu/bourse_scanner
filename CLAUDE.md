@@ -5,7 +5,7 @@ Bot Python de veille boursiere PEA. Analyse des donnees marche en temps reel, co
 ## Commandes
 
 ```bash
-uv run pytest tests/ -v          # Lancer tous les tests (404 tests)
+uv run pytest tests/ -v          # Lancer tous les tests (405 tests)
 uv run pytest tests/ -v -x       # Stopper au premier echec
 uv run python scripts/init_db.py       # Initialiser la base SQLite
 uv run python scripts/import_pdfs.py   # Importer les PDF dans la base
@@ -139,12 +139,12 @@ SQLite dans `data/trades.db`. Tables principales (12 tables):
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1-7 DONE + feedback debrided | Filtrage adaptatif remplace par CATALYST_STATS informatif (plus de blocage). 12 jobs scheduler (4 nouvelles sources). Seuil 0.50 pour maximiser les signaux et le feedback. |
-| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + OPENAI_API_KEY + NEWSDATA_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
-| Tests | 404/404 PASS | database(59), pdf_parser(17), trade_matcher(7), ticker_mapper(11), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(37), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6), predictor(10), signal_filter(13), formatter(7), telegram_bot(4), signal_reviewer(32), performance_tracker(29), model_retrainer(25), orderbook_collector(8) |
-| Data | Collectee + LLM analysee + enrichie + 97 reviews | 214 exec, 166 trades, 1357+ prix, 1824+ news, 649 catalyseurs, 141 analyses LLM, 97 signal reviews |
-| Docs | Design + plans Etapes 2-5 | docs/plans/2026-02-22-etape*-*.md, 2026-02-23-etape4-*.md, 2026-02-24-etape4-llm-*.md |
-| Git | Pushe sur origin | 30+ commits, master a jour |
+| Code | Etape 1-7 DONE + feedback loop corrige | 5 bugs critiques corriges le 12 mars 2026. Modele retraine sur dataset equilibre (90W/155L). Scanner tourne sur VPS avec 13 jobs. |
+| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + OPENAI_API_KEY (nouvelle cle 12 mars) + NEWSDATA_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
+| Tests | 405/405 PASS | database(59), pdf_parser(17), trade_matcher(7), ticker_mapper(11), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(38), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6), predictor(10), signal_filter(13), formatter(7), telegram_bot(4), signal_reviewer(32), performance_tracker(29), model_retrainer(25), orderbook_collector(9) |
+| Data VPS | 202 signaux, 134 reviews, 7132 news, 2702 prix, 6943 orderbook | Win rate global: 16.4% (22W 84L 28N). Modele retraine le 12 mars sur dataset equilibre. |
+| Docs | Design + plans Etapes 2-5 + fix feedback loop | docs/plans/2026-03-12-fix-feedback-loop.md |
+| Git | Pushe sur origin | master a jour, VPS synchro |
 
 ## Sources de donnees actives
 
@@ -200,32 +200,34 @@ L'etape 4 (Feature Engineering + ML) doit:
 
 ## Changements recents (mars 2026)
 
-**Philosophie: envoyer TOUT pour que le bot apprenne.** Le feedback loop sur-filtrait (EXCLUDE_CATALYST bloquait 96% des signaux). Corrige:
+**9 mars — Philosophie: envoyer TOUT pour que le bot apprenne.** Le feedback loop sur-filtrait (EXCLUDE_CATALYST bloquait 96% des signaux). Corrige:
 
-1. **Filtrage debrided**: EXCLUDE_CATALYST remplace par CATALYST_STATS (informatif, pas bloquant). Les alertes Telegram montrent le win rate historique du catalyseur mais ne bloquent plus l'envoi.
-2. **Seuil abaisse a 0.50**: On envoie TOUS les signaux, meme faibles, pour avoir des donnees negatives (le modele etait entraine sur 89% de trades gagnants).
-3. **4 nouvelles sources dans le scheduler**: Alpha Vantage (8h), Marketaux (12h), Newsdata.io (14h), LLM Sentiment (toutes les 2h). Total: 12 jobs.
-4. **Seuil adaptatif adouci**: +0.02 si WR<30%, +0.01 si WR<40%, cap base+0.10 (etait +0.04/+0.02, cap 0.95).
-5. **Fix retrain**: `date_achat` ajoute au vecteur de features pour le walk-forward split.
+1. **Filtrage debrided**: EXCLUDE_CATALYST remplace par CATALYST_STATS (informatif, pas bloquant).
+2. **Seuil abaisse a 0.50**: On envoie TOUS les signaux pour avoir des donnees negatives.
+3. **4 nouvelles sources dans le scheduler**: Alpha Vantage, Marketaux, Newsdata.io, LLM Sentiment. Total: 13 jobs.
+4. **Apprentissage continu**: `build_combined_features()` fusionne trades historiques + signal reviews.
+5. **Carnet d'ordres**: OrderBookCollector scrape Boursorama (31 symboles). 4 features orderbook.
 
-6. **Apprentissage continu**: `build_combined_features()` fusionne trades historiques + signal reviews. Seuil is_winner harmonise a 4.5% (etait > 0). min_reviews_retrain abaisse a 20.
-7. **Carnet d'ordres**: OrderBookCollector scrape Boursorama (31 symboles). 4 features: bid_ask_volume_ratio, bid_ask_order_ratio, spread_pct, bid_depth_concentration. Job 13 toutes les 15 min.
-8. **12 tables** en BDD (ajout: orderbook_snapshots). 404 tests.
+**12 mars — 5 bugs critiques corriges (le bot n'apprenait pas):**
+
+1. **Orderbook parser**: `_parse_orderbook()` cherchait `data["bids"]` mais Boursorama renvoie `data["orderbook"]["lines"]` avec format `{bid, bidSize, bidNb, ask, askSize, askNb}`. 6943 snapshots etaient vides. Corrige.
+2. **Retrain crash KeyError date_achat**: `build_realtime_features()` ne retournait pas `date_achat`. Quand les reviews etaient combinees pour le retrain, la colonne manquait et `walk_forward_validate()` crashait. Corrige.
+3. **Walk-forward split_date hardcode**: `split_date="2025-12-01"` dans `trainer.py`. Pour 2026, tout etait dans le test set. Remplace par split dynamique (75e percentile).
+4. **catalyst_news_title toujours None**: Hardcode `None` dans `predictor.py`. Maintenant extrait de la meilleure news matchee.
+5. **Predictor ne rechargeait pas apres retrain**: Apres un retrain reussi, le scanner continuait avec l'ancien modele en memoire. Ajout de `reload_model()`.
+6. **Cle API OpenAI invalide sur VPS**: Remplacee par nouvelle cle.
+7. **Modele retraine**: Dataset equilibre 90 winners / 155 losers (etait 89% winners). Scores maintenant de 0.09 a 0.97 (etait 0.85-0.98 pour tout).
 
 ## Next Immediate Action
 
-**Deployer sur le VPS et re-entrainer le modele.**
+**Surveiller le bot et attendre les prochaines reviews.**
 
-Actions immediates:
-1. **Push** le code vers GitHub et pull sur le VPS
-2. **Re-entrainer** le modele avec `uv run python scripts/train_model.py` — le nouveau seuil 4.5% va equilibrer le dataset (~60/55 au lieu de ~102/13)
-3. **Redemarrer** le scanner sur le VPS (13 jobs maintenant)
-4. **Tester** le scraping orderbook live: `uv run python -c "from src.data_collection.orderbook_collector import OrderBookCollector; from src.core.database import Database; db = Database('data/trades.db'); c = OrderBookCollector(db); r = c.collect_orderbook('DBV.PA'); print(r)"`
-
-Prochaines evolutions:
-1. **Attendre 20+ reviews** avec la nouvelle config pour triggerer un retrain automatique
-2. **Evaluer** l'impact du carnet d'ordres sur les features apres accumulation de donnees
-3. **Ameliorer** le parsing Boursorama si le format HTML change
+Le bot tourne sur le VPS avec le modele retraine. Prochaines etapes:
+1. **Surveiller** les reviews J+3 des prochains jours — verifier que le win rate s'ameliore avec le nouveau modele
+2. **Verifier** que le LLM sentiment scorer fonctionne (nouvelle cle API OpenAI)
+3. **Verifier** que les orderbook features ne sont plus 0.0 (parser corrige, mais donnees seulement pendant horaires marche)
+4. **Dimanche 15 mars 19h**: Premier retrain automatique avec le cycle complet
+5. **Ameliorer** le retrainer: la comparaison old/new est biaisee (les deux modeles font le meme walk-forward, donc memes metriques)
 
 ## Donnees cles du trading
 
