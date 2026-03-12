@@ -104,25 +104,51 @@ class OrderBookCollector:
     def _parse_orderbook(self, data: dict) -> dict:
         """Extrait les metriques du carnet d'ordres.
 
+        Supporte deux formats:
+        - Nouveau format Boursorama: data["orderbook"]["lines"] avec
+          {bid, bidSize, bidNb, ask, askSize, askNb}
+        - Ancien format: data["bids"]/data["asks"] avec
+          {price, quantity, orders}
+
         Returns:
             Dict avec best_bid, best_ask, volumes, spread, ratios.
         """
-        bids = data.get("bids", [])
-        asks = data.get("asks", [])
+        bid_volumes = []
+        ask_volumes = []
+        bid_orders_list = []
+        ask_orders_list = []
+        best_bid = 0
+        best_ask = 0
 
-        best_bid = bids[0].get("price", 0) if bids else 0
-        best_ask = asks[0].get("price", 0) if asks else 0
+        # Nouveau format Boursorama: orderbook.lines
+        lines = (data.get("orderbook") or {}).get("lines", [])
+        if lines:
+            for line in lines:
+                bid_volumes.append(line.get("bidSize", 0) or 0)
+                ask_volumes.append(line.get("askSize", 0) or 0)
+                bid_orders_list.append(line.get("bidNb", 0) or 0)
+                ask_orders_list.append(line.get("askNb", 0) or 0)
 
-        bid_volumes = [b.get("quantity", 0) or 0 for b in bids]
-        ask_volumes = [a.get("quantity", 0) or 0 for a in asks]
+            best_bid = lines[0].get("bid", 0) or 0
+            best_ask = lines[0].get("ask", 0) or 0
+        else:
+            # Ancien format: bids/asks
+            bids = data.get("bids", [])
+            asks = data.get("asks", [])
 
-        bid_orders = [b.get("orders", 0) or 0 for b in bids]
-        ask_orders = [a.get("orders", 0) or 0 for a in asks]
+            best_bid = bids[0].get("price", 0) if bids else 0
+            best_ask = asks[0].get("price", 0) if asks else 0
+
+            bid_volumes = [b.get("quantity", 0) or 0 for b in bids]
+            ask_volumes = [a.get("quantity", 0) or 0 for a in asks]
+
+            bid_orders_list = [b.get("orders", 0) or 0 for b in bids]
+            ask_orders_list = [a.get("orders", 0) or 0 for a in asks]
 
         bid_volume_total = sum(bid_volumes)
         ask_volume_total = sum(ask_volumes)
-        bid_orders_total = sum(bid_orders)
-        ask_orders_total = sum(ask_orders)
+        bid_orders_total = sum(bid_orders_list)
+        ask_orders_total = sum(ask_orders_list)
 
         # Spread en %
         spread_pct = 0.0

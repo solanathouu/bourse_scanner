@@ -239,7 +239,7 @@ def update_filter_rules(db, config):
     logger.info(f"Stats mises a jour: {len(rules)} catalyseurs, seuil={threshold:.2f}")
 
 
-def check_retrain(db, config, telegram, dry_run):
+def check_retrain(db, config, telegram, dry_run, predictor=None):
     """Verifie si re-entrainement necessaire et execute."""
     from src.feedback.model_retrainer import ModelRetrainer
 
@@ -256,6 +256,11 @@ def check_retrain(db, config, telegram, dry_run):
 
     result = retrainer.retrain_with_validation(model_path)
     report = retrainer.format_retrain_report(result)
+
+    if result.get("deployed") and predictor is not None:
+        new_path = result.get("new_path", model_path)
+        predictor.reload_model(new_path)
+        logger.info(f"Predictor recharge avec {new_path}")
 
     if telegram and not dry_run:
         telegram.send_alert_sync(report)
@@ -602,7 +607,7 @@ def run_scheduler(dry_run: bool = False):
             minute=0,
             day_of_week=feedback_config.get("retrain_day", "sun"),
         ),
-        args=[db, config, telegram, dry_run],
+        args=[db, config, telegram, dry_run, predictor],
         id="check_retrain",
         name="Check retrain",
     )

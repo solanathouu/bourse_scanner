@@ -498,6 +498,7 @@ class TestOrderbookFeatures:
             "ask_orders_total": 4,
             "spread_pct": 1.0,
             "bid_ask_volume_ratio": 1.6429,
+            "bid_depth_concentration": 0.8696,
             "raw_json": json.dumps(raw_data),
         })
         result = self.engine._build_orderbook_features("SAN.PA")

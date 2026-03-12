@@ -240,12 +240,15 @@ class Database:
                 ask_orders_total INTEGER,
                 spread_pct REAL,
                 bid_ask_volume_ratio REAL,
+                bid_depth_concentration REAL,
                 raw_json TEXT,
                 UNIQUE(ticker, snapshot_time)
             );
             CREATE INDEX IF NOT EXISTS idx_orderbook_ticker_time
                 ON orderbook_snapshots(ticker, snapshot_time);
         """)
+        # Migration: ajouter bid_depth_concentration si absente
+        self._migrate_orderbook_columns(conn)
 
         conn.close()
         logger.info(f"Base de données initialisée: {self.db_path}")
@@ -267,6 +270,14 @@ class Database:
         if "signal_price" not in existing:
             conn.execute("ALTER TABLE signals ADD COLUMN signal_price REAL")
             logger.info("Migration: colonne 'signal_price' ajoutee a la table signals")
+        conn.commit()
+
+    def _migrate_orderbook_columns(self, conn: sqlite3.Connection):
+        """Ajoute la colonne bid_depth_concentration a orderbook_snapshots si absente."""
+        existing = [row[1] for row in conn.execute("PRAGMA table_info(orderbook_snapshots)").fetchall()]
+        if "bid_depth_concentration" not in existing:
+            conn.execute("ALTER TABLE orderbook_snapshots ADD COLUMN bid_depth_concentration REAL")
+            logger.info("Migration: colonne 'bid_depth_concentration' ajoutee a orderbook_snapshots")
         conn.commit()
 
     def insert_execution(self, execution: dict):
@@ -888,18 +899,20 @@ class Database:
                 (ticker, snapshot_time, best_bid, best_ask,
                  bid_volume_total, ask_volume_total,
                  bid_orders_total, ask_orders_total,
-                 spread_pct, bid_ask_volume_ratio, raw_json)
+                 spread_pct, bid_ask_volume_ratio,
+                 bid_depth_concentration, raw_json)
             VALUES
                 (:ticker, :snapshot_time, :best_bid, :best_ask,
                  :bid_volume_total, :ask_volume_total,
                  :bid_orders_total, :ask_orders_total,
-                 :spread_pct, :bid_ask_volume_ratio, :raw_json)
+                 :spread_pct, :bid_ask_volume_ratio,
+                 :bid_depth_concentration, :raw_json)
         """, {
             "best_bid": None, "best_ask": None,
             "bid_volume_total": None, "ask_volume_total": None,
             "bid_orders_total": None, "ask_orders_total": None,
             "spread_pct": None, "bid_ask_volume_ratio": None,
-            "raw_json": None,
+            "bid_depth_concentration": None, "raw_json": None,
             **snapshot,
         })
         conn.commit()
@@ -912,7 +925,7 @@ class Database:
              "bid_volume_total": None, "ask_volume_total": None,
              "bid_orders_total": None, "ask_orders_total": None,
              "spread_pct": None, "bid_ask_volume_ratio": None,
-             "raw_json": None, **s}
+             "bid_depth_concentration": None, "raw_json": None, **s}
             for s in snapshots
         ]
         conn = self._connect()
@@ -921,12 +934,14 @@ class Database:
                 (ticker, snapshot_time, best_bid, best_ask,
                  bid_volume_total, ask_volume_total,
                  bid_orders_total, ask_orders_total,
-                 spread_pct, bid_ask_volume_ratio, raw_json)
+                 spread_pct, bid_ask_volume_ratio,
+                 bid_depth_concentration, raw_json)
             VALUES
                 (:ticker, :snapshot_time, :best_bid, :best_ask,
                  :bid_volume_total, :ask_volume_total,
                  :bid_orders_total, :ask_orders_total,
-                 :spread_pct, :bid_ask_volume_ratio, :raw_json)
+                 :spread_pct, :bid_ask_volume_ratio,
+                 :bid_depth_concentration, :raw_json)
         """, enriched)
         conn.commit()
         conn.close()

@@ -325,7 +325,10 @@ class FeatureEngine:
             is_winner = 1 if outcome == "WIN" else 0
 
             features["is_winner"] = is_winner
-            features["date_achat"] = review.get("signal_date", "")
+            signal_date = review.get("signal_date")
+            if not signal_date:
+                signal_date = "2025-01-01"
+            features["date_achat"] = signal_date
             features["trade_id"] = -review.get("signal_id", 0)
             review_rows.append(features)
 
@@ -399,6 +402,7 @@ class FeatureEngine:
         ob_features = self._build_orderbook_features(ticker)
 
         return {
+            "date_achat": date,
             **tech_features,
             **cat_features,
             **fund_features,
@@ -425,6 +429,7 @@ class FeatureEngine:
                 "news_sentiment": 0.0,
                 "has_clear_catalyst": 0,
                 "buy_reason_length": 0,
+                "best_news_title": None,
             }
 
         classifier = NewsClassifier()
@@ -446,6 +451,7 @@ class FeatureEngine:
             "news_sentiment": round(avg_sentiment, 4),
             "has_clear_catalyst": has_catalyst,
             "buy_reason_length": len(best.get("title", "")),
+            "best_news_title": best.get("title"),
         }
 
     def _build_realtime_context_features(self, ticker: str, date: str) -> dict:
@@ -487,10 +493,7 @@ class FeatureEngine:
         }
 
     def _build_orderbook_features(self, ticker: str) -> dict:
-        """Construit les features du carnet d'ordres.
-
-        Utilise le dernier snapshot en BDD. Retourne des zeros si aucun snapshot.
-        """
+        """Construit les features du carnet d'ordres."""
         default = {f: 0.0 for f in ORDERBOOK_FEATURES}
 
         snapshot = self.db.get_latest_orderbook(ticker)
@@ -503,27 +506,11 @@ class FeatureEngine:
         if ask_orders > 0:
             bid_ask_order_ratio = round(bid_orders / ask_orders, 4)
 
-        # Concentration top 3 depuis raw_json
-        bid_depth_concentration = 0.0
-        raw = snapshot.get("raw_json")
-        if raw:
-            try:
-                data = json.loads(raw)
-                bids = data.get("bids", [])
-                vols = [b.get("quantity", 0) or 0 for b in bids]
-                total = sum(vols)
-                if total > 0 and len(vols) >= 3:
-                    bid_depth_concentration = round(sum(vols[:3]) / total, 4)
-                elif total > 0:
-                    bid_depth_concentration = 1.0
-            except (json.JSONDecodeError, TypeError):
-                pass
-
         return {
             "bid_ask_volume_ratio": snapshot.get("bid_ask_volume_ratio") or 0.0,
             "bid_ask_order_ratio": bid_ask_order_ratio,
             "spread_pct": snapshot.get("spread_pct") or 0.0,
-            "bid_depth_concentration": bid_depth_concentration,
+            "bid_depth_concentration": snapshot.get("bid_depth_concentration") or 0.0,
         }
 
     def get_feature_names(self) -> list[str]:

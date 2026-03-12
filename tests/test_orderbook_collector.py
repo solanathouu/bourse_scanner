@@ -87,6 +87,28 @@ class TestParseOrderbook:
         assert result["spread_pct"] == 0.0
         assert result["bid_ask_volume_ratio"] == 0.0
 
+    def test_parse_orderbook_real_boursorama_format(self):
+        """Test parsing du vrai format Boursorama (orderbook.lines)."""
+        data = {
+            "symbol": "1rPSAN",
+            "orderbook": {
+                "lines": [
+                    {"askNb": 5, "askSize": 6600, "ask": 76.50, "bidNb": 3, "bidSize": 6800, "bid": 76.25},
+                    {"askNb": 2, "askSize": 3000, "ask": 76.60, "bidNb": 4, "bidSize": 4200, "bid": 76.20},
+                    {"askNb": 1, "askSize": 1500, "ask": 76.70, "bidNb": 2, "bidSize": 2000, "bid": 76.15},
+                ]
+            }
+        }
+        result = self.collector._parse_orderbook(data)
+        assert result["best_bid"] == 76.25
+        assert result["best_ask"] == 76.50
+        assert result["bid_volume_total"] == 13000  # 6800+4200+2000
+        assert result["ask_volume_total"] == 11100  # 6600+3000+1500
+        assert result["bid_orders_total"] == 9  # 3+4+2
+        assert result["ask_orders_total"] == 8  # 5+2+1
+        assert result["spread_pct"] > 0
+        assert result["bid_ask_volume_ratio"] > 1  # Plus d'acheteurs
+
 
 class TestFetchOrderbook:
     """Tests du fetch HTTP avec mock."""

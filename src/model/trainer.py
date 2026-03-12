@@ -108,17 +108,27 @@ class Trainer:
         return self.model.predict_proba(X)[:, 1]
 
     def walk_forward_validate(self, features_df: pd.DataFrame,
-                               split_date: str = "2025-12-01") -> dict:
+                               split_date: str | None = None) -> dict:
         """Validation walk-forward: train avant split_date, test apres.
 
         Args:
             features_df: DataFrame complet avec features + target + date_achat.
             split_date: Date de separation train/test (YYYY-MM-DD).
+                        Si None, calcule automatiquement a 75% des dates.
 
         Returns:
             Dict avec metriques et predictions detaillees.
         """
         df = features_df.copy()
+
+        if split_date is None:
+            if "date_achat" not in df.columns or df["date_achat"].isna().all():
+                return {"error": "Pas de colonne date_achat"}
+            dates = df["date_achat"].dropna().sort_values()
+            dates = dates[dates != ""]
+            if len(dates) < 10:
+                return {"error": "Pas assez de donnees pour split"}
+            split_date = dates.iloc[int(len(dates) * 0.75)]
 
         train_mask = df["date_achat"] < split_date
         test_mask = df["date_achat"] >= split_date

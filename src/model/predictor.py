@@ -20,9 +20,18 @@ class Predictor:
     def __init__(self, db: Database,
                  model_path: str = "data/models/nicolas_v1.joblib"):
         self.db = db
+        self._model_path = model_path
         self.engine = FeatureEngine(db)
         self.trainer = Trainer()
         self.trainer.load_model(model_path)
+
+    def reload_model(self, model_path: str | None = None):
+        """Recharge le modele depuis le disque apres un retrain."""
+        if model_path is None:
+            model_path = self._model_path
+        self.trainer.load_model(model_path)
+        self.engine._price_cache.clear()
+        logger.info(f"Modele recharge: {model_path}")
 
     def score_ticker(self, ticker: str, current_price: float,
                      date: str | None = None) -> dict | None:
@@ -62,12 +71,12 @@ class Predictor:
             "score": round(score, 4),
             "current_price": round(current_price, 2),
             "catalyst_type": features.get("catalyst_type", "UNKNOWN"),
-            "catalyst_news_title": None,
+            "catalyst_news_title": features.pop("best_news_title", None),
             "features": features,
             "features_json": json.dumps(
                 {k: round(v, 4) if isinstance(v, float) else v
                  for k, v in features.items()
-                 if k != "catalyst_type"}
+                 if k not in ("catalyst_type", "best_news_title", "date_achat")}
             ),
             "technical_summary": self._build_technical_summary(features),
         }
