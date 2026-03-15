@@ -140,11 +140,12 @@ SQLite dans `data/trades.db`. Tables principales (12 tables):
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1-7 DONE + refonte feedback loop 15 mars | LLM news classifier, feedback features, TP system, regime marche, modele simplifie, data leakage corrige. Dashboard FastAPI. |
+| Code | Etape 1-7 DONE + refonte complete 15 mars | LLM classifier, feedback features, TP, regime marche, dedup LLM, bot interactif, dashboard. |
 | Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + GEMINI_API_KEY + NEWSDATA_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
-| Tests | 434/434 PASS | +16 llm_news_classifier, +4 feedback_features, +2 market_regime, +3 formatter, +4 signal_reviewer_tp |
-| Data VPS | 216 signaux, 157 reviews, 7570 news, 2756+ prix, 13168 orderbook | Win rate global: 16.6% (26W 94L 37N). Modele v3 actif (f1=0.316). |
+| Tests | 434/434 PASS | +16 llm_news_classifier, +4 feedback, +2 market, +3 formatter, +4 tp |
+| Data VPS | 216 signaux, 157 reviews, 7570 news, 2756+ prix, 13168 orderbook | Modele v3 actif (f1=0.316). |
 | Dashboard | http://31.97.196.120:8050 | 4 pages: accueil, news, signal, portfolio. Lecture seule. |
+| Telegram | Bot interactif actif | Boutons PRIS/PASSE + chatbot + trades manuels. 3 tmux: scanner, telegram, dashboard. |
 | Docs | Plans + design specs | docs/plans/2026-03-15-*.md |
 | Git | Pushe sur origin | master a jour, VPS synchro |
 
@@ -220,22 +221,38 @@ L'etape 4 (Feature Engineering + ML) doit:
 8. **Dashboard FastAPI**: http://31.97.196.120:8050 — 4 pages (accueil, news, signal detail, portfolio virtuel). Lecture seule, dark theme.
 9. **Tracking par version**: Chaque signal enregistre la version du modele. Portfolio filtrable par version.
 10. **Modele v3 deploye**: f1=0.316, precision=37.5%, accuracy=84%. Entraine sur 268 samples (111 trades + 157 reviews).
+11. **Deduplication LLM**: Les news sont groupees par evenement (event_group_id). Le feature engine ne compte qu'un signal par groupe au lieu de gonfler artificiellement le sentiment.
+12. **Bot Telegram interactif**: Boutons PRIS/PASSE sous chaque signal. Chat libre pour trades manuels ("J'ai achete SOITEC a 55€ parce que bons resultats"). Le LLM analyse et enregistre. Table user_actions + signals manuels (model_version="manual").
 
 **Regles absolues du projet:**
 - Ne JAMAIS supprimer de donnees d'entrainement (meme le bruit RSS sert au modele)
 - Envoyer TOUS les signaux sur Telegram (ne filtrer que quand le win rate sera assez haut)
 - Le dashboard est en LECTURE SEULE, aucune influence sur l'algorithme
 
+## Services VPS (3 tmux sessions)
+
+```bash
+ssh root@31.97.196.120 "bash -lc 'tmux capture-pane -t scanner -p'"    # Scanner
+ssh root@31.97.196.120 "bash -lc 'tmux capture-pane -t telegram -p'"   # Bot interactif
+ssh root@31.97.196.120 "bash -lc 'tmux capture-pane -t dashboard -p'"  # Dashboard
+```
+
 ## Next Immediate Action
 
 **Laisser le bot tourner et surveiller via le dashboard.**
 
-Le bot tourne sur le VPS avec le modele v3. Le feedback loop est autonome:
-1. **Lundi 17 mars**: Premiers signaux v3 emis pendant les heures de marche
-2. **Jeudi 20 mars**: Premieres reviews J+3 des signaux v3 (avec systeme TP)
+Le bot tourne sur le VPS avec le modele v3 + bot interactif Telegram:
+1. **Lundi 17 mars**: Premiers signaux v3 avec boutons PRIS/PASSE
+2. **Jeudi 20 mars**: Premieres reviews J+3 avec systeme TP (high max J+0-J+3)
 3. **Chaque soir 19h**: Retrain quotidien automatique (v4, v5, ...)
 4. **Dashboard**: http://31.97.196.120:8050 pour suivre en temps reel
-5. **Ne rien filtrer** tant que le win rate n'est pas assez haut (decision Nicolas)
+5. **Telegram**: Nicolas peut enregistrer ses trades manuels via chat libre
+6. **Ne rien filtrer** tant que le win rate n'est pas assez haut (decision Nicolas)
+
+**Prochaines ameliorations potentielles:**
+- Momentum sectoriel (performance du secteur vs stock individuel)
+- Walk-forward plus robuste (5 fenetres glissantes au lieu d'un seul split)
+- Page user_actions dans le dashboard (voir les trades de Nicolas)
 
 ## Donnees cles du trading
 
