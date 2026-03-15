@@ -521,6 +521,7 @@ class FeatureEngine:
                 "catalyst_confidence": summary["catalyst_confidence"],
                 "news_sentiment": round(avg_sentiment, 4),
                 "has_clear_catalyst": summary["has_clear_catalyst"],
+                "nb_unique_events": summary.get("nb_unique_events", 0),
                 "buy_reason_length": len(explanation) or len(title),
                 "best_news_title": title,
                 **feedback,

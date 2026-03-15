@@ -271,6 +271,9 @@ class Database:
         if "llm_relevance_score" not in existing:
             conn.execute("ALTER TABLE news ADD COLUMN llm_relevance_score REAL")
             logger.info("Migration: colonne 'llm_relevance_score' ajoutee")
+        if "event_group_id" not in existing:
+            conn.execute("ALTER TABLE news ADD COLUMN event_group_id INTEGER")
+            logger.info("Migration: colonne 'event_group_id' ajoutee (deduplication)")
         conn.commit()
 
     def _migrate_signals_columns(self, conn: sqlite3.Connection):
@@ -630,13 +633,14 @@ class Database:
         conn.close()
 
     def update_news_llm_classification(self, news_id: int, catalyst_type: str,
-                                        confidence: float, relevance: float):
+                                        confidence: float, relevance: float,
+                                        event_group_id: int | None = None):
         """Met a jour la classification LLM d'une news."""
         conn = self._connect()
         conn.execute(
             "UPDATE news SET llm_catalyst_type = ?, llm_catalyst_confidence = ?, "
-            "llm_relevance_score = ? WHERE id = ?",
-            (catalyst_type, confidence, relevance, news_id),
+            "llm_relevance_score = ?, event_group_id = ? WHERE id = ?",
+            (catalyst_type, confidence, relevance, event_group_id, news_id),
         )
         conn.commit()
         conn.close()

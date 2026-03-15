@@ -35,12 +35,14 @@ Pour CHAQUE news ci-dessous, determine:
    - 0.0 = la news mentionne un mot similaire par hasard (ex: "Monroe Capital" n'est pas ALCAP)
    - 1.0 = la news parle directement de cette entreprise
 4. Une explication courte (1 phrase max) de pourquoi c'est un signal d'achat ou de vente
+5. Un numero de groupe (event_group): les news qui parlent du MEME evenement ont le meme numero.
+   Ex: 3 articles sur "resultats T2 Sanofi" = meme groupe. Articles differents = groupes differents.
 
 News a analyser:
 {news_list}
 
 Reponds UNIQUEMENT avec un JSON array:
-[{{"news_index": 1, "catalyst_type": "EARNINGS", "confidence": 0.85, "relevance": 0.95, "explanation": "Resultats T3 au-dessus du consensus"}}]"""
+[{{"news_index": 1, "catalyst_type": "EARNINGS", "confidence": 0.85, "relevance": 0.95, "explanation": "Resultats T3 au-dessus du consensus", "event_group": 1}}]"""
 
 DELAY_BETWEEN_CALLS = 0.5  # secondes
 
@@ -110,6 +112,8 @@ class LLMNewsClassifier:
             relevance = max(0.0, min(1.0, float(item.get("relevance", 0.0))))
             explanation = (item.get("explanation") or "")[:300]
 
+            event_group = int(item.get("event_group", 0))
+
             results.append({
                 "news_id": news_list[idx]["id"],
                 "news_index": idx,
@@ -117,6 +121,7 @@ class LLMNewsClassifier:
                 "confidence": confidence,
                 "relevance": relevance,
                 "explanation": explanation,
+                "event_group": event_group,
             })
 
         return results
@@ -167,11 +172,13 @@ class LLMNewsClassifier:
                     self.db.update_news_llm_classification(
                         news["id"], r["catalyst_type"],
                         r["confidence"], r["relevance"],
+                        r.get("event_group"),
                     )
                     news["llm_catalyst_type"] = r["catalyst_type"]
                     news["llm_catalyst_confidence"] = r["confidence"]
                     news["llm_relevance_score"] = r["relevance"]
                     news["llm_explanation"] = r["explanation"]
+                    news["event_group_id"] = r.get("event_group")
 
             time.sleep(DELAY_BETWEEN_CALLS)
 
@@ -180,8 +187,9 @@ class LLMNewsClassifier:
     def summarize_for_realtime(self, classified_news: list[dict]) -> dict:
         """Resume les catalyseurs LLM pour les features temps reel.
 
-        Filtre les news non pertinentes (relevance < 0.3) et retourne
-        le catalyseur le plus confiant.
+        Filtre les news non pertinentes (relevance < 0.3), deduplique par
+        event_group (1 evenement = 1 signal, meme s'il y a 4 articles),
+        et retourne le catalyseur le plus confiant.
         """
         relevant = [
             n for n in classified_news
@@ -194,17 +202,31 @@ class LLMNewsClassifier:
                 "catalyst_type": "TECHNICAL",
                 "catalyst_confidence": 0.0,
                 "has_clear_catalyst": 0,
+                "nb_unique_events": 0,
                 "best_news_title": None,
                 "best_explanation": None,
             }
 
-        best = max(relevant, key=lambda n: n.get("llm_catalyst_confidence") or 0)
+        # Deduplication par event_group: garder la meilleure news par groupe
+        groups: dict[int, dict] = {}
+        ungrouped = []
+        for n in relevant:
+            gid = n.get("event_group_id") or n.get("event_group")
+            if gid and gid > 0:
+                if gid not in groups or (n.get("llm_catalyst_confidence") or 0) > (groups[gid].get("llm_catalyst_confidence") or 0):
+                    groups[gid] = n
+            else:
+                ungrouped.append(n)
+
+        unique_events = list(groups.values()) + ungrouped
+        best = max(unique_events, key=lambda n: n.get("llm_catalyst_confidence") or 0)
         cat_type = best.get("llm_catalyst_type", "UNKNOWN")
 
         return {
             "catalyst_type": cat_type,
             "catalyst_confidence": best.get("llm_catalyst_confidence", 0.5),
             "has_clear_catalyst": 1 if cat_type not in ("TECHNICAL", "UNKNOWN") else 0,
+            "nb_unique_events": len(unique_events),
             "best_news_title": best.get("title"),
             "best_explanation": best.get("llm_explanation"),
         }
