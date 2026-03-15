@@ -250,6 +250,22 @@ class Database:
         # Migration: ajouter bid_depth_concentration si absente
         self._migrate_orderbook_columns(conn)
 
+        # Table user_actions (feedback Nicolas via Telegram)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS user_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                entry_price REAL,
+                exit_price REAL,
+                exit_type TEXT,
+                user_comment TEXT,
+                llm_analysis TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (signal_id) REFERENCES signals(id)
+            );
+        """)
+
         conn.close()
         logger.info(f"Base de données initialisée: {self.db_path}")
 
@@ -836,6 +852,46 @@ class Database:
             elif outcome == "NEUTRAL":
                 stats["neutrals"] = count
         return stats
+
+    # --- User Actions ---
+
+    def insert_user_action(self, action: dict):
+        """Insere une action utilisateur (PRIS/PASSE/commentaire)."""
+        conn = self._connect()
+        conn.execute("""
+            INSERT INTO user_actions
+                (signal_id, action, entry_price, exit_price,
+                 exit_type, user_comment, llm_analysis, created_at)
+            VALUES
+                (:signal_id, :action, :entry_price, :exit_price,
+                 :exit_type, :user_comment, :llm_analysis, :created_at)
+        """, {
+            "entry_price": None, "exit_price": None,
+            "exit_type": None, "user_comment": None, "llm_analysis": None,
+            **action,
+        })
+        conn.commit()
+        conn.close()
+
+    def get_user_action(self, signal_id: int) -> dict | None:
+        """Recupere l'action utilisateur pour un signal."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM user_actions WHERE signal_id = ? ORDER BY id DESC LIMIT 1",
+            (signal_id,),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_latest_signal_by_ticker(self, ticker: str) -> dict | None:
+        """Recupere le dernier signal pour un ticker."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM signals WHERE ticker = ? ORDER BY id DESC LIMIT 1",
+            (ticker,),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
 
     # --- Filter Rules ---
 

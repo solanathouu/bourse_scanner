@@ -303,7 +303,8 @@ def collect_orderbook(db: Database, watchlist: list[dict]):
 
 def score_and_alert(predictor: Predictor, signal_filter: SignalFilter,
                     formatter: AlertFormatter, telegram: TelegramBot | None,
-                    watchlist: list[dict], dry_run: bool = False):
+                    watchlist: list[dict], dry_run: bool = False,
+                    interactive: "TelegramInteractive | None" = None):
     """Score la watchlist, filtre et envoie les alertes."""
     # Verifier horaires marche
     if not dry_run and not signal_filter.is_market_hours():
@@ -349,9 +350,28 @@ def score_and_alert(predictor: Predictor, signal_filter: SignalFilter,
             print(message)
             print()
         elif telegram:
-            success = telegram.send_alert_sync(message)
-            if success:
-                signal_filter.record_signal(signal)
+            # D'abord enregistrer pour avoir l'ID
+            signal_filter.record_signal(signal)
+            latest = signal_filter.db.get_latest_signal(signal["ticker"])
+            signal_id = latest["id"] if latest else None
+
+            if interactive and signal_id:
+                # Envoyer avec boutons PRIS/PASSE
+                import asyncio
+                try:
+                    asyncio.run(interactive.send_signal_with_buttons(
+                        telegram.bot, message, signal_id,
+                    ))
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    loop.run_until_complete(
+                        interactive.send_signal_with_buttons(
+                            telegram.bot, message, signal_id,
+                        )
+                    )
+                    loop.close()
+            else:
+                telegram.send_alert_sync(message)
         else:
             print(f"\n[NO TELEGRAM] {signal['ticker']} score={signal['score']:.2f}")
 
@@ -467,11 +487,18 @@ def run_scheduler(dry_run: bool = False):
     formatter = AlertFormatter()
 
     telegram = None
+    interactive = None
     if not dry_run:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         chat_id = os.getenv("TELEGRAM_CHAT_ID")
         if token and chat_id:
             telegram = TelegramBot(token, chat_id)
+            try:
+                from src.alerts.telegram_interactive import TelegramInteractive
+                interactive = TelegramInteractive(db)
+                logger.info("Bot Telegram interactif active (boutons PRIS/PASSE)")
+            except Exception as e:
+                logger.warning(f"Bot interactif non disponible: {e}")
 
     scheduler = BlockingScheduler(timezone=market_config.get("timezone", "Europe/Paris"))
 
@@ -503,7 +530,7 @@ def run_scheduler(dry_run: bool = False):
             minutes=sched_config.get("scoring_interval_min", 60),
             start_date="2026-01-01 09:30:00",
         ),
-        args=[predictor, signal_filter, formatter, telegram, watchlist, dry_run],
+        args=[predictor, signal_filter, formatter, telegram, watchlist, dry_run, interactive],
         id="score_and_alert",
         name="Scoring + alertes",
     )
@@ -646,6 +673,7 @@ def run_scheduler(dry_run: bool = False):
     print(f"  Seuil: {filter_config['threshold']}")
     print(f"  Mode: {'dry-run' if dry_run else 'live'}")
     print(f"  Telegram: {'configure' if telegram else 'non configure'}")
+    print(f"  Bot interactif: {'actif' if interactive else 'desactive'}")
     print(f"\nJobs programmes:")
     print(f"  - Prix: toutes les {sched_config.get('prices_interval_min', 2)} min")
     print(f"  - News RSS: toutes les {sched_config.get('news_interval_min', 10)} min")
@@ -661,6 +689,20 @@ def run_scheduler(dry_run: bool = False):
     print(f"  - Resume hebdo: {feedback_config.get('weekly_day', 'dim')} a {feedback_config.get('weekly_hour', 20)}h")
     print(f"  - Carnet d'ordres: toutes les {sched_config.get('orderbook_interval_min', 15)} min")
     print(f"\nCtrl+C pour arreter\n")
+
+    # Lancer le bot interactif dans un thread separe
+    if interactive:
+        import threading
+        def run_interactive():
+            try:
+                app = interactive.create_application()
+                app.run_polling(drop_pending_updates=True)
+            except Exception as e:
+                logger.error(f"Bot interactif crash: {e}")
+
+        bot_thread = threading.Thread(target=run_interactive, daemon=True)
+        bot_thread.start()
+        logger.info("Bot interactif Telegram demarre en arriere-plan")
 
     scheduler.start()
 
