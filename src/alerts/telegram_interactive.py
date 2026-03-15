@@ -2,6 +2,7 @@
 
 Ecoute les reponses de Nicolas aux signaux et les enregistre en base.
 Le LLM analyse les commentaires libres pour en extraire des infos structurees.
+Supporte les trades manuels (actions non proposees par le bot).
 """
 
 import json
@@ -24,6 +25,31 @@ try:
     HAS_TELEGRAM = True
 except ImportError:
     HAS_TELEGRAM = False
+
+ANALYZE_PROMPT = """Tu es l'assistant d'un trader francais nomme Nicolas (PEA, swing court terme).
+Nicolas t'envoie un message dans Telegram. Analyse-le et extrais les informations.
+
+Tickers connus: {known_tickers}
+
+Message de Nicolas: "{text}"
+
+Determine:
+1. Est-ce un ACHAT (il a achete ou veut acheter), une VENTE (TP, SL, il a vendu),
+   un COMMENTAIRE sur un trade existant, ou un message NON_TRADING (hors sujet)?
+2. Quel ticker est concerne? (utilise le format .PA, ex: SAN.PA)
+3. Extrais les details si mentionnes.
+
+Reponds UNIQUEMENT avec un JSON:
+{{
+    "type": "ACHAT" ou "VENTE" ou "COMMENTAIRE" ou "NON_TRADING",
+    "ticker": "SAN.PA" ou null,
+    "company_name": "SANOFI" ou null,
+    "entry_price": float ou null,
+    "exit_price": float ou null,
+    "exit_type": "TP" ou "SL" ou null,
+    "reason": "la raison donnee par Nicolas" ou null,
+    "summary": "resume en 1 phrase"
+}}"""
 
 
 class TelegramInteractive:
@@ -92,7 +118,6 @@ class TelegramInteractive:
                 "Trade enregistre. A quel prix as-tu achete ? "
                 "(Reponds avec le prix, ex: 76.50)"
             )
-            # Stocker le signal_id en attente de prix
             context.user_data["pending_price"] = signal_id
             logger.info(f"Action PRIS enregistree pour signal #{signal_id}")
 
@@ -107,7 +132,7 @@ class TelegramInteractive:
             logger.info(f"Action PASSE enregistree pour signal #{signal_id}")
 
     async def handle_message(self, update: Update, context) -> None:
-        """Gere les messages libres — prix d'entree ou commentaires."""
+        """Gere les messages libres — prix, trades manuels, commentaires."""
         if not update.message or not update.message.text:
             return
 
@@ -119,15 +144,12 @@ class TelegramInteractive:
         if pending:
             try:
                 price = float(text.replace(",", ".").replace("€", "").strip())
-                # Mettre a jour l'action avec le prix
-                action = self.db.get_user_action(pending)
-                if action:
-                    self.db.insert_user_action({
-                        "signal_id": pending,
-                        "action": "PRIS",
-                        "entry_price": price,
-                        "created_at": now,
-                    })
+                self.db.insert_user_action({
+                    "signal_id": pending,
+                    "action": "PRIS",
+                    "entry_price": price,
+                    "created_at": now,
+                })
                 context.user_data.pop("pending_price", None)
                 await update.message.reply_text(
                     f"Prix d'achat enregistre: {price:.2f} EUR. "
@@ -136,69 +158,170 @@ class TelegramInteractive:
                 logger.info(f"Prix {price} enregistre pour signal #{pending}")
                 return
             except ValueError:
-                pass  # Pas un prix, traiter comme commentaire
+                context.user_data.pop("pending_price", None)
 
-        # Commentaire libre — analyser avec LLM
-        analysis = self._analyze_comment(text)
-        if analysis:
-            signal_id = analysis.get("signal_id")
-            if signal_id:
-                self.db.insert_user_action({
-                    "signal_id": signal_id,
-                    "action": analysis.get("action", "COMMENT"),
-                    "entry_price": analysis.get("entry_price"),
-                    "exit_price": analysis.get("exit_price"),
-                    "exit_type": analysis.get("exit_type"),
-                    "user_comment": text,
-                    "llm_analysis": json.dumps(analysis, ensure_ascii=False),
-                    "created_at": now,
-                })
-                await update.message.reply_text(
-                    f"Compris ! {analysis.get('summary', 'Enregistre.')}"
-                )
-                logger.info(f"Commentaire analyse pour signal #{signal_id}: {analysis}")
-                return
+        # Analyser avec le LLM
+        analysis = self._analyze_message(text)
+        if not analysis:
+            await update.message.reply_text(
+                "Je n'ai pas compris. Tu peux me dire :\n"
+                "- \"J'ai achete SANOFI a 76€ parce que bons resultats\"\n"
+                "- \"J'ai vendu SOITEC a 58€, TP atteint\"\n"
+                "- Ou repondre directement a un signal"
+            )
+            return
 
-        # Pas de signal identifie — repondre simplement
+        msg_type = analysis.get("type", "NON_TRADING")
+        ticker = analysis.get("ticker")
+        summary = analysis.get("summary", "")
+
+        if msg_type == "NON_TRADING" or not ticker:
+            await update.message.reply_text(
+                f"Compris, mais je n'ai pas identifie de trade. {summary}"
+            )
+            return
+
+        if msg_type == "ACHAT":
+            await self._handle_buy(analysis, text, now, update)
+        elif msg_type == "VENTE":
+            await self._handle_sell(analysis, text, now, update)
+        elif msg_type == "COMMENTAIRE":
+            await self._handle_comment(analysis, text, now, update)
+
+    async def _handle_buy(self, analysis: dict, text: str,
+                           now: str, update: Update) -> None:
+        """Traite un message d'achat — signal existant ou trade manuel."""
+        ticker = analysis["ticker"]
+        entry_price = analysis.get("entry_price")
+        reason = analysis.get("reason") or ""
+
+        # Chercher un signal existant pour ce ticker
+        existing_signal = self.db.get_latest_signal_by_ticker(ticker)
+
+        if existing_signal:
+            # Lier au signal existant
+            self.db.insert_user_action({
+                "signal_id": existing_signal["id"],
+                "action": "PRIS",
+                "entry_price": entry_price,
+                "user_comment": text,
+                "llm_analysis": json.dumps(analysis, ensure_ascii=False),
+                "created_at": now,
+            })
+            price_str = f" a {entry_price:.2f} EUR" if entry_price else ""
+            await update.message.reply_text(
+                f"Achat {ticker}{price_str} enregistre "
+                f"(lie au signal #{existing_signal['id']}).\n"
+                f"Raison: {reason[:100]}"
+            )
+        else:
+            # Trade manuel — creer un signal manuel en base
+            today = datetime.now().strftime("%Y-%m-%d")
+            self.db.insert_signal({
+                "ticker": ticker,
+                "date": today,
+                "score": 0.0,
+                "signal_price": entry_price,
+                "catalyst_type": "MANUAL",
+                "catalyst_news_title": reason[:200] if reason else "Trade manuel",
+                "sent_at": now,
+                "model_version": "manual",
+            })
+            new_signal = self.db.get_latest_signal_by_ticker(ticker)
+            signal_id = new_signal["id"] if new_signal else 0
+
+            self.db.insert_user_action({
+                "signal_id": signal_id,
+                "action": "PRIS",
+                "entry_price": entry_price,
+                "user_comment": text,
+                "llm_analysis": json.dumps(analysis, ensure_ascii=False),
+                "created_at": now,
+            })
+
+            price_str = f" a {entry_price:.2f} EUR" if entry_price else ""
+            await update.message.reply_text(
+                f"Trade MANUEL enregistre: achat {ticker}{price_str}.\n"
+                f"Raison: {reason[:100]}\n"
+                f"Je suivrai ce trade et le reviewerai a J+3."
+            )
+
+        logger.info(f"Achat {ticker} enregistre (prix={entry_price}, raison={reason[:50]})")
+
+    async def _handle_sell(self, analysis: dict, text: str,
+                            now: str, update: Update) -> None:
+        """Traite un message de vente — TP ou SL."""
+        ticker = analysis["ticker"]
+        exit_price = analysis.get("exit_price")
+        exit_type = analysis.get("exit_type") or "VENTE"
+
+        signal = self.db.get_latest_signal_by_ticker(ticker)
+        if not signal:
+            await update.message.reply_text(
+                f"Je n'ai pas de trade ouvert sur {ticker}."
+            )
+            return
+
+        self.db.insert_user_action({
+            "signal_id": signal["id"],
+            "action": exit_type,
+            "exit_price": exit_price,
+            "exit_type": exit_type,
+            "user_comment": text,
+            "llm_analysis": json.dumps(analysis, ensure_ascii=False),
+            "created_at": now,
+        })
+
+        price_str = f" a {exit_price:.2f} EUR" if exit_price else ""
         await update.message.reply_text(
-            "Je n'ai pas identifie de signal associe. "
-            "Reponds directement a un signal ou mentionne le ticker."
+            f"{exit_type} {ticker}{price_str} enregistre. "
+            f"{analysis.get('summary', '')}"
         )
+        logger.info(f"{exit_type} {ticker} enregistre (prix={exit_price})")
 
-    def _analyze_comment(self, text: str) -> dict | None:
-        """Analyse un commentaire libre avec Gemini pour extraire les infos."""
+    async def _handle_comment(self, analysis: dict, text: str,
+                               now: str, update: Update) -> None:
+        """Traite un commentaire sur un trade."""
+        ticker = analysis["ticker"]
+        signal = self.db.get_latest_signal_by_ticker(ticker)
+
+        if signal:
+            self.db.insert_user_action({
+                "signal_id": signal["id"],
+                "action": "COMMENT",
+                "user_comment": text,
+                "llm_analysis": json.dumps(analysis, ensure_ascii=False),
+                "created_at": now,
+            })
+            await update.message.reply_text(
+                f"Commentaire sur {ticker} enregistre. "
+                f"{analysis.get('summary', '')}"
+            )
+        else:
+            await update.message.reply_text(
+                f"Commentaire note, mais pas de trade {ticker} en cours."
+            )
+
+    def _analyze_message(self, text: str) -> dict | None:
+        """Analyse un message libre avec Gemini."""
         try:
             from google import genai
             from google.genai import types
+            from src.data_collection.ticker_mapper import TICKER_MAP
 
             api_key = os.getenv("GEMINI_API_KEY")
             if not api_key:
                 return None
 
-            # Chercher le dernier signal mentionne (par ticker)
-            signal = self._find_signal_in_text(text)
-            if not signal:
-                return None
+            known = ", ".join(f"{name} ({ticker})" for name, ticker in TICKER_MAP.items())
+            prompt = ANALYZE_PROMPT.format(known_tickers=known, text=text)
 
             client = genai.Client(api_key=api_key)
-            prompt = f"""Analyse ce message d'un trader a propos d'un signal sur {signal['ticker']}:
-
-Message: "{text}"
-
-Extrais les informations en JSON:
-- "action": "TP" si take profit, "SL" si stop loss, "COMMENT" sinon
-- "entry_price": prix d'achat mentionne (null si absent)
-- "exit_price": prix de vente/sortie mentionne (null si absent)
-- "exit_type": "TP" ou "SL" ou null
-- "summary": resume en 1 phrase de ce que le trader dit
-
-Reponds UNIQUEMENT avec le JSON."""
-
             response = client.models.generate_content(
                 model="gemini-2.5-flash-lite",
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    temperature=0.1, max_output_tokens=200,
+                    temperature=0.1, max_output_tokens=300,
                 ),
             )
 
@@ -208,25 +331,11 @@ Reponds UNIQUEMENT avec le JSON."""
                 lines = [l for l in lines if not l.strip().startswith("```")]
                 cleaned = "\n".join(lines).strip()
 
-            result = json.loads(cleaned)
-            result["signal_id"] = signal["id"]
-            return result
+            return json.loads(cleaned)
 
         except Exception as e:
-            logger.error(f"Analyse commentaire echouee: {e}")
+            logger.error(f"Analyse message echouee: {e}")
             return None
-
-    def _find_signal_in_text(self, text: str) -> dict | None:
-        """Cherche un ticker mentionne dans le texte et retourne le dernier signal."""
-        text_upper = text.upper()
-        # Chercher les tickers connus
-        from src.data_collection.ticker_mapper import TICKER_MAP
-        for name, ticker in TICKER_MAP.items():
-            if name.upper() in text_upper or ticker.replace(".PA", "") in text_upper:
-                signal = self.db.get_latest_signal_by_ticker(ticker)
-                if signal:
-                    return signal
-        return None
 
     def create_application(self) -> "Application":
         """Cree l'application Telegram avec handlers."""
