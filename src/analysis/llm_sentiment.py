@@ -35,7 +35,7 @@ DELAY_BETWEEN_CALLS = 0.5  # secondes
 class LLMSentimentScorer:
     """Score le sentiment des news via Gemini."""
 
-    def __init__(self, db: Database, model: str = "gemini-2.0-flash"):
+    def __init__(self, db: Database, model: str = "gemini-2.5-flash-lite"):
         self.db = db
         self.model = model
 

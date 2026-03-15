@@ -68,7 +68,7 @@ Reponds UNIQUEMENT avec le JSON, sans texte autour."""
 class LLMAnalyzer:
     """Analyse les trades de Nicolas via Gemini."""
 
-    def __init__(self, db: Database, model: str = "gemini-2.0-flash"):
+    def __init__(self, db: Database, model: str = "gemini-2.5-flash-lite"):
         self.db = db
         self.model = model
         self.mapper = TickerMapper()

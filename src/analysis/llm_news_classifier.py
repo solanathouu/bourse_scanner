@@ -48,7 +48,7 @@ DELAY_BETWEEN_CALLS = 0.5  # secondes
 class LLMNewsClassifier:
     """Classifie les news par type de catalyseur via Gemini."""
 
-    def __init__(self, db: Database, model: str = "gemini-2.0-flash"):
+    def __init__(self, db: Database, model: str = "gemini-2.5-flash-lite"):
         self.db = db
         self.model = model
 
