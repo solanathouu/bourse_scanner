@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}PEA Scanner &mdash; Accueil{% endblock %}
+
+{% block content %}
+<h1>Tableau de bord</h1>
+
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-label">Win Rate</div>
+        <div class="kpi-value">{{ "%.1f"|format(win_rate) }}%</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Total Signaux</div>
+        <div class="kpi-value">{{ total_signals }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Modele Actif</div>
+        <div class="kpi-value">{{ active_model.version if active_model else 'N/A' }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">F1 Score</div>
+        <div class="kpi-value">{{ "%.2f"|format(active_model.f1 or 0) if active_model else 'N/A' }}</div>
+    </div>
+</div>
+
+<div class="chart-container">
+    <h2>Win Rate par semaine</h2>
+    <canvas id="winRateChart"></canvas>
+</div>
+
+<div class="card">
+    <div class="card-header">Derniers signaux</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Ticker</th>
+                <th>Score</th>
+                <th>Catalyseur</th>
+                <th>News</th>
+                <th>Resultat</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in last_signals %}
+            <tr style="cursor:pointer" onclick="window.location='/signal/{{ s.id }}'">
+                <td>{{ s.date }}</td>
+                <td><span class="badge badge-ticker">{{ s.ticker }}</span></td>
+                <td>{{ "%.0f"|format(s.score * 100) }}%</td>
+                <td>{% if s.catalyst_type %}<span class="badge badge-catalyst">{{ s.catalyst_type }}</span>{% else %}-{% endif %}</td>
+                <td>{{ (s.catalyst_news_title or '-')[:60] }}</td>
+                <td>
+                    {% if s.outcome == 'WIN' %}
+                        <span class="badge badge-win">WIN {{ "%.1f"|format(s.performance_pct) }}%</span>
+                    {% elif s.outcome == 'LOSS' %}
+                        <span class="badge badge-loss">LOSS {{ "%.1f"|format(s.performance_pct) }}%</span>
+                    {% elif s.outcome == 'NEUTRAL' %}
+                        <span class="badge badge-neutral">NEUTRAL</span>
+                    {% else %}
+                        <span class="badge badge-pending">En attente</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const weeklyData = {{ weekly_winrate | tojson }};
+    const ctx = document.getElementById('winRateChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: weeklyData.map(d => d.week),
+            datasets: [{
+                label: 'Win Rate (%)',
+                data: weeklyData.map(d => d.win_rate),
+                borderColor: '#4fc3f7',
+                backgroundColor: 'rgba(79, 195, 247, 0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true, max: 100,
+                    ticks: { color: '#a0a0a0' },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                },
+                x: {
+                    ticks: { color: '#a0a0a0' },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                }
+            },
+            plugins: { legend: { labels: { color: '#e0e0e0' } } }
+        }
+    });
+</script>
+{% endblock %}

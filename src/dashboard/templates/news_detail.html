@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}PEA Scanner &mdash; {{ news.title }}{% endblock %}
+
+{% block content %}
+<div class="detail-header">
+    <a href="/news" class="back-link">&larr; Retour aux news</a>
+    <h1>{{ news.title }}</h1>
+    <div class="detail-meta">
+        <span class="ticker-badge">{{ news.ticker }}</span>
+        <span class="meta-item">{{ news.date }}</span>
+        {% if news.source %}
+        <span class="meta-item">Source : {{ news.source }}</span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="detail-body">
+    <div class="detail-section">
+        <h2>Sentiment</h2>
+        <div class="sentiment-display">
+            {% if news.sentiment is not none %}
+                {% if news.sentiment > 0.2 %}
+                    <span class="sentiment-score sentiment-positive">{{ "%.2f"|format(news.sentiment) }}</span>
+                    <span class="sentiment-label">Positif</span>
+                {% elif news.sentiment < -0.2 %}
+                    <span class="sentiment-score sentiment-negative">{{ "%.2f"|format(news.sentiment) }}</span>
+                    <span class="sentiment-label">N&eacute;gatif</span>
+                {% else %}
+                    <span class="sentiment-score sentiment-neutral">{{ "%.2f"|format(news.sentiment) }}</span>
+                    <span class="sentiment-label">Neutre</span>
+                {% endif %}
+            {% else %}
+                <span class="sentiment-score sentiment-neutral">N/A</span>
+                <span class="sentiment-label">Non &eacute;valu&eacute;</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if news.catalyst_type or news.confidence or news.relevance_score %}
+    <div class="detail-section">
+        <h2>Classification LLM</h2>
+        <div class="classification-grid">
+            {% if news.catalyst_type %}
+            <div class="classification-item">
+                <span class="classification-label">Type de catalyseur</span>
+                <span class="badge badge-catalyst">{{ news.catalyst_type }}</span>
+            </div>
+            {% endif %}
+            {% if news.confidence is not none %}
+            <div class="classification-item">
+                <span class="classification-label">Confiance</span>
+                <span class="classification-value">{{ "%.0f"|format(news.confidence * 100) }}%</span>
+            </div>
+            {% endif %}
+            {% if news.relevance_score is not none %}
+            <div class="classification-item">
+                <span class="classification-label">Pertinence</span>
+                <span class="classification-value">{{ "%.0f"|format(news.relevance_score * 100) }}%</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if news.description %}
+    <div class="detail-section">
+        <h2>Contenu</h2>
+        <div class="news-content">{{ news.description }}</div>
+    </div>
+    {% endif %}
+
+    {% if news.url %}
+    <div class="detail-actions">
+        <a href="{{ news.url }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary">
+            Voir l'article original &rarr;
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

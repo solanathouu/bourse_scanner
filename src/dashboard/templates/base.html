@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}PEA Scanner{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">PEA Scanner</div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Accueil</a>
+            <a href="/news" class="nav-link">News</a>
+            <a href="/portfolio" class="nav-link">Portfolio</a>
+        </div>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <p>PEA Scanner Bot &mdash; Veille boursi&egrave;re PEA</p>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,169 @@
+/* PEA Scanner Dashboard — Dark Theme */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    line-height: 1.6;
+}
+
+a { color: #4fc3f7; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Nav */
+nav {
+    background: #0f3460;
+    padding: 12px 24px;
+    display: flex;
+    gap: 24px;
+    align-items: center;
+}
+nav a { color: #e0e0e0; font-weight: 600; }
+nav a:hover { color: #4fc3f7; text-decoration: none; }
+.nav-brand { font-size: 18px; color: #4fc3f7; margin-right: 16px; }
+
+/* Container */
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+/* KPI Cards */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.kpi-card {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+}
+.kpi-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #4fc3f7;
+}
+.kpi-label {
+    font-size: 14px;
+    color: #888;
+    margin-top: 4px;
+}
+
+/* Cards */
+.card {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+.card-header {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: #4fc3f7;
+}
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; }
+th {
+    text-align: left;
+    padding: 10px 12px;
+    background: #0f3460;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+td { padding: 10px 12px; border-bottom: 1px solid #1e3054; }
+tr:hover { background: #1e3054; }
+
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.badge-win { background: #00b894; color: #fff; }
+.badge-loss { background: #e74c3c; color: #fff; }
+.badge-neutral { background: #636e72; color: #fff; }
+.badge-pending { background: #fdcb6e; color: #333; }
+.badge-positive { background: #00b894; color: #fff; }
+.badge-negative { background: #e74c3c; color: #fff; }
+.badge-neutral-sentiment { background: #636e72; color: #fff; }
+.badge-catalyst { background: #0f3460; color: #4fc3f7; }
+.badge-ticker { background: #2d4a7a; color: #e0e0e0; }
+
+/* Buttons */
+.btn {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    font-size: 14px;
+}
+.btn-primary { background: #0f3460; color: #4fc3f7; }
+.btn-primary:hover { background: #163d6f; text-decoration: none; }
+
+/* Score display */
+.score-big {
+    font-size: 48px;
+    font-weight: 700;
+}
+
+/* Filters */
+select {
+    background: #16213e;
+    color: #e0e0e0;
+    border: 1px solid #2d4a7a;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 16px;
+}
+
+/* Chart container */
+.chart-container {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 24px;
+}
+
+/* News list */
+.news-item {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.news-item:hover { background: #1e3054; }
+.news-title { flex: 1; }
+.news-date { color: #888; font-size: 13px; white-space: nowrap; }
+
+/* Signal detail sections */
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.detail-item { margin-bottom: 8px; }
+.detail-label { color: #888; font-size: 13px; }
+.detail-value { font-size: 16px; font-weight: 600; }
+
+/* Footer */
+footer {
+    text-align: center;
+    padding: 16px;
+    color: #555;
+    font-size: 12px;
+}

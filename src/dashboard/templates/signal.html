@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}PEA Scanner &mdash; Signal {{ signal.ticker }}{% endblock %}
+
+{% block content %}
+<p><a href="/">&larr; Retour</a></p>
+
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-label">Ticker</div>
+        <div class="kpi-value">{{ signal.ticker }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Date</div>
+        <div class="kpi-value" style="font-size:24px">{{ signal.date }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Score</div>
+        <div class="kpi-value" style="color: {% if signal.score >= 0.7 %}#00b894{% elif signal.score >= 0.5 %}#fdcb6e{% else %}#e74c3c{% endif %}">
+            {{ "%.0f"|format(signal.score * 100) }}%
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Prix signal</div>
+        <div class="kpi-value" style="font-size:24px">{{ "%.2f"|format(signal.signal_price or 0) }} EUR</div>
+    </div>
+</div>
+
+<div class="detail-grid">
+    <div class="card">
+        <div class="card-header">Catalyseur</div>
+        <div class="detail-item">
+            <div class="detail-label">Type</div>
+            <div class="detail-value"><span class="badge badge-catalyst">{{ signal.catalyst_type or 'N/A' }}</span></div>
+        </div>
+        {% if signal.catalyst_news_title %}
+        <div class="detail-item">
+            <div class="detail-label">News declencheuse</div>
+            <div class="detail-value">{{ signal.catalyst_news_title }}</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header">Technique</div>
+        <div class="detail-item">
+            <div class="detail-label">RSI(14)</div>
+            <div class="detail-value" style="color: {% if features.get('rsi_14', 50) < 30 %}#00b894{% elif features.get('rsi_14', 50) > 70 %}#e74c3c{% else %}#e0e0e0{% endif %}">
+                {{ "%.1f"|format(features.get('rsi_14', 0)) }}
+            </div>
+        </div>
+        <div class="detail-item">
+            <div class="detail-label">MACD Histogram</div>
+            <div class="detail-value">{{ "%.4f"|format(features.get('macd_histogram', 0)) }}</div>
+        </div>
+        <div class="detail-item">
+            <div class="detail-label">Bollinger Position</div>
+            <div class="detail-value">{{ "%.2f"|format(features.get('bollinger_position', 0)) }}</div>
+        </div>
+        <div class="detail-item">
+            <div class="detail-label">Volume Ratio (20j)</div>
+            <div class="detail-value">{{ "%.2f"|format(features.get('volume_ratio_20', 0)) }}x</div>
+        </div>
+        <div class="detail-item">
+            <div class="detail-label">Range Position (20j)</div>
+            <div class="detail-value">{{ "%.2f"|format(features.get('range_position_20', 0)) }}</div>
+        </div>
+    </div>
+</div>
+
+{% if tradingview_url %}
+<p style="margin-bottom:16px">
+    <a href="{{ tradingview_url }}" target="_blank" class="btn btn-primary">Voir sur TradingView</a>
+</p>
+{% endif %}
+
+{% if review %}
+<div class="card">
+    <div class="card-header">Resultat J+3</div>
+    <div class="detail-grid">
+        <div>
+            <div class="detail-item">
+                <div class="detail-label">Prix signal</div>
+                <div class="detail-value">{{ "%.2f"|format(review.signal_price) }} EUR</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Prix J+3</div>
+                <div class="detail-value">{{ "%.2f"|format(review.review_price) }} EUR</div>
+            </div>
+        </div>
+        <div>
+            <div class="detail-item">
+                <div class="detail-label">Performance</div>
+                <div class="detail-value" style="font-size:24px; color: {% if review.performance_pct >= 0 %}#00b894{% else %}#e74c3c{% endif %}">
+                    {{ "%+.2f"|format(review.performance_pct) }}%
+                </div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Verdict</div>
+                <div class="detail-value">
+                    {% if review.outcome == 'WIN' %}<span class="badge badge-win">WIN</span>
+                    {% elif review.outcome == 'LOSS' %}<span class="badge badge-loss">LOSS</span>
+                    {% else %}<span class="badge badge-neutral">NEUTRAL</span>{% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% if review.failure_reason %}
+    <div class="detail-item" style="margin-top:8px">
+        <div class="detail-label">Raison echec</div>
+        <div class="detail-value" style="color:#e74c3c">{{ review.failure_reason }}</div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">Feedback historique</div>
+    <div class="detail-grid">
+        <div class="detail-item">
+            <div class="detail-label">Win rate catalyseur ({{ signal.catalyst_type }})</div>
+            <div class="detail-value">{{ "%.1f"|format((features.get('catalyst_historical_win_rate', 0)) * 100) }}%
+                ({{ features.get('catalyst_historical_sample_size', 0)|int }} reviews)</div>
+        </div>
+        <div class="detail-item">
+            <div class="detail-label">Win rate ticker ({{ signal.ticker }})</div>
+            <div class="detail-value">{{ "%.1f"|format((features.get('ticker_historical_win_rate', 0)) * 100) }}%</div>
+        </div>
+    </div>
+</div>
+{% endblock %}

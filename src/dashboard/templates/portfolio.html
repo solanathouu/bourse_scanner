@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}PEA Scanner &mdash; Portfolio{% endblock %}
+
+{% block content %}
+<h1>Portfolio virtuel</h1>
+
+<form method="get" action="/portfolio" style="margin-bottom: 16px;">
+    <select name="filter" onchange="this.form.submit()">
+        <option value="all" {% if selected_filter == 'all' %}selected{% endif %}>Tous les signaux</option>
+        <option value="confirmed" {% if selected_filter == 'confirmed' %}selected{% endif %}>CONFIRME uniquement</option>
+        {% for cat in catalyst_types %}
+        <option value="{{ cat }}" {% if selected_filter == cat %}selected{% endif %}>{{ cat }}</option>
+        {% endfor %}
+    </select>
+</form>
+
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-label">Nombre de trades</div>
+        <div class="kpi-value">{{ total_trades }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Wins</div>
+        <div class="kpi-value" style="color: #00b894">{{ total_wins }}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Performance totale</div>
+        <div class="kpi-value" style="color: {% if total_return_pct >= 0 %}#00b894{% else %}#e74c3c{% endif %}">
+            {{ "%+.1f"|format(total_return_pct) }}%
+        </div>
+    </div>
+</div>
+
+<div class="chart-container">
+    <h2>Performance cumulee</h2>
+    <canvas id="perfChart"></canvas>
+</div>
+
+<div class="card">
+    <div class="card-header">Trades virtuels</div>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Ticker</th>
+                <th>Catalyseur</th>
+                <th>Prix entree</th>
+                <th>Prix sortie</th>
+                <th>Performance</th>
+                <th>Resultat</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in trades %}
+            <tr>
+                <td>{{ t.signal_date }}</td>
+                <td><span class="badge badge-ticker">{{ t.ticker }}</span></td>
+                <td>{{ t.catalyst_type or '-' }}</td>
+                <td>{{ "%.2f"|format(t.signal_price) }} EUR</td>
+                <td>{{ "%.2f"|format(t.review_price) }} EUR</td>
+                <td style="color: {% if t.performance_pct >= 0 %}#00b894{% else %}#e74c3c{% endif %}">
+                    {{ "%+.2f"|format(t.performance_pct) }}%
+                </td>
+                <td>
+                    {% if t.outcome == 'WIN' %}<span class="badge badge-win">WIN</span>
+                    {% elif t.outcome == 'LOSS' %}<span class="badge badge-loss">LOSS</span>
+                    {% else %}<span class="badge badge-neutral">NEUTRAL</span>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const trades = {{ trades | tojson }};
+    const ctx = document.getElementById('perfChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: trades.map(t => t.signal_date),
+            datasets: [{
+                label: 'Performance cumulee (%)',
+                data: trades.map(t => t.cumulative_pct),
+                borderColor: '#4fc3f7',
+                backgroundColor: 'rgba(79, 195, 247, 0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { ticks: { color: '#a0a0a0' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                x: { ticks: { color: '#a0a0a0', maxRotation: 45 }, grid: { color: 'rgba(255,255,255,0.05)' } }
+            },
+            plugins: { legend: { labels: { color: '#e0e0e0' } } }
+        }
+    });
+</script>
+{% endblock %}
