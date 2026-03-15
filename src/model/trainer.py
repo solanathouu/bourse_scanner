@@ -81,10 +81,14 @@ class Trainer:
         scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
 
         self.model = xgb.XGBClassifier(
-            max_depth=4,
-            n_estimators=100,
-            learning_rate=0.1,
+            max_depth=2,
+            n_estimators=80,
+            learning_rate=0.05,
             scale_pos_weight=scale_pos_weight,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_lambda=1.0,
+            min_child_weight=5,
             eval_metric="logloss",
             random_state=42,
         )

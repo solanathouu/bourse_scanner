@@ -401,6 +401,9 @@ class FeatureEngine:
         # Features carnet d'ordres
         ob_features = self._build_orderbook_features(ticker)
 
+        # Features regime marche (CAC40)
+        market_features = self._build_market_regime_features(date)
+
         return {
             "date_achat": date,
             **tech_features,
@@ -408,6 +411,63 @@ class FeatureEngine:
             **fund_features,
             **ctx_features,
             **ob_features,
+            **market_features,
+        }
+
+    def _build_market_regime_features(self, date: str) -> dict:
+        """Construit les features de regime marche a partir du CAC40.
+
+        Utilise ^FCHI (CAC40 index) ou CW8.PA (ETF monde) comme proxy.
+        Permet au modele de savoir si le marche est haussier ou baissier.
+        """
+        import numpy as np
+
+        default = {
+            "market_sma20_trend": 0.0,
+            "market_rsi": 50.0,
+            "market_variation_5j": 0.0,
+        }
+
+        # Essayer CAC40 index, sinon CW8.PA comme proxy
+        for market_ticker in ("^FCHI", "CW8.PA"):
+            prices = self.db.get_prices(market_ticker)
+            if len(prices) >= 25:
+                break
+        else:
+            return default
+
+        import pandas as pd
+        df = pd.DataFrame(prices).sort_values("date")
+        close = df["close"].astype(float)
+
+        # Filtrer jusqu'a la date
+        df_until = df[df["date"] <= date]
+        if len(df_until) < 20:
+            return default
+
+        close_until = df_until["close"].astype(float)
+
+        # SMA20 trend: prix actuel vs SMA20 (>0 = au-dessus = haussier)
+        sma20 = close_until.rolling(20).mean().iloc[-1]
+        current = close_until.iloc[-1]
+        trend = (current - sma20) / sma20 * 100 if sma20 > 0 else 0.0
+
+        # RSI 14 du marche
+        delta = close_until.diff()
+        gain = delta.clip(lower=0).rolling(14).mean().iloc[-1]
+        loss = (-delta.clip(upper=0)).rolling(14).mean().iloc[-1]
+        rsi = 100 - (100 / (1 + gain / loss)) if loss > 0 else 50.0
+
+        # Variation 5 jours
+        if len(close_until) >= 6:
+            var_5j = (close_until.iloc[-1] / close_until.iloc[-6] - 1) * 100
+        else:
+            var_5j = 0.0
+
+        return {
+            "market_sma20_trend": round(float(trend), 4),
+            "market_rsi": round(float(rsi), 2),
+            "market_variation_5j": round(float(var_5j), 4),
         }
 
     def _build_realtime_catalyst_features(self, ticker: str, date: str) -> dict:

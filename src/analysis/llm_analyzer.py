@@ -39,10 +39,7 @@ Voici un trade a analyser:
 ## Infos du trade
 - Action: {nom_action}
 - Achat: {date_achat} a {prix_achat:.2f} EUR
-- Vente: {date_vente} a {prix_vente:.2f} EUR
-- Rendement: {rendement:+.2f}%
 - Duree: {duree_jours} jours
-- Resultat: {resultat}
 
 ## Indicateurs techniques au moment de l'achat
 {technical_context}
@@ -59,8 +56,7 @@ Analyse ce trade et reponds en JSON strict avec ces champs:
 - "catalyst_summary": une phrase commencant par "Nicolas a achete parce que..."
 - "news_sentiment": float -1.0 a +1.0, sentiment de la news declencheuse (0 si aucune)
 - "buy_reason": 2-3 phrases expliquant pourquoi Nicolas a achete a ce moment precis
-- "sell_reason": 1-2 phrases expliquant pourquoi il a vendu (objectif atteint, stop loss, etc.)
-- "trade_quality": un parmi ["EXCELLENT", "BON", "MOYEN", "MAUVAIS"] selon le rendement et la logique
+- "sell_reason": 1-2 phrases expliquant pourquoi il a probablement vendu
 
 Reponds UNIQUEMENT avec le JSON, sans texte autour."""
 
@@ -175,21 +171,13 @@ class LLMAnalyzer:
         technical_context = self._get_technical_context(trade)
         news_context, _ = self._get_news_context(trade)
 
-        date_vente = trade["date_vente"][:10] if trade["date_vente"] else "OUVERT"
-        prix_vente = trade["prix_vente"] or 0
-        rendement = trade["rendement_brut_pct"] or 0
         duree = trade["duree_jours"] or 0
-        resultat = "GAGNANT" if rendement > 0 else "PERDANT"
 
         return LLM_ANALYSIS_PROMPT.format(
             nom_action=trade["nom_action"],
             date_achat=trade["date_achat"][:10],
             prix_achat=trade["prix_achat"],
-            date_vente=date_vente,
-            prix_vente=prix_vente,
-            rendement=rendement,
             duree_jours=duree,
-            resultat=resultat,
             technical_context=technical_context,
             news_context=news_context,
             valid_types=", ".join(VALID_CATALYST_TYPES),

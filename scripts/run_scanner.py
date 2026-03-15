@@ -52,6 +52,8 @@ def refresh_prices(db: Database, watchlist: list[dict]):
 
     collector = PriceCollector(db)
     tickers = [item["ticker"] for item in watchlist]
+    # Ajouter le CAC40 pour les features regime marche
+    tickers.append("^FCHI")
     total = 0
 
     for ticker in tickers:

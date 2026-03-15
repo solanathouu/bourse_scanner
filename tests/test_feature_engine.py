@@ -441,6 +441,43 @@ class TestBuildCombinedFeatures:
         assert review_ids[0] == -1
 
 
+class TestMarketRegimeFeatures:
+    """Tests des features regime marche."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+        self.engine = FeatureEngine(self.db)
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_market_features_no_data(self):
+        """Sans donnees CAC40, features par defaut."""
+        result = self.engine._build_market_regime_features("2025-08-15")
+        assert result["market_sma20_trend"] == 0.0
+        assert result["market_rsi"] == 50.0
+        assert result["market_variation_5j"] == 0.0
+
+    def test_market_features_with_cac40(self):
+        """Avec prix CAC40, les features sont calculees."""
+        # Inserer 30 jours de prix pour ^FCHI
+        for i in range(30):
+            day = f"2025-08-{i+1:02d}" if i < 30 else f"2025-09-{i-29:02d}"
+            self.db.insert_price({
+                "ticker": "^FCHI", "date": day,
+                "open": 7500 + i * 10, "high": 7510 + i * 10,
+                "low": 7490 + i * 10, "close": 7500 + i * 10,
+                "volume": 100000,
+            })
+        result = self.engine._build_market_regime_features("2025-08-30")
+        assert result["market_sma20_trend"] != 0.0
+        # RSI sera 100 ou proche (serie croissante = que des gains)
+        assert "market_rsi" in result
+
+
 class TestFeedbackFeatures:
     """Tests des features de feedback historique."""
 
