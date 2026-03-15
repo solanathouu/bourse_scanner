@@ -1,7 +1,7 @@
-"""Score le sentiment des news sans sentiment via GPT-4o-mini.
+"""Score le sentiment des news sans sentiment via Gemini Flash Lite.
 
 Pour chaque news avec sentiment IS NULL, envoie le titre et la description
-a GPT-4o-mini et recupere un score de sentiment entre -1.0 et +1.0.
+a Gemini et recupere un score de sentiment entre -1.0 et +1.0.
 """
 
 import json
@@ -10,7 +10,8 @@ import time
 
 from dotenv import load_dotenv
 from loguru import logger
-from openai import OpenAI
+from google import genai
+from google.genai import types
 
 from src.core.database import Database
 
@@ -32,18 +33,18 @@ DELAY_BETWEEN_CALLS = 0.5  # secondes
 
 
 class LLMSentimentScorer:
-    """Score le sentiment des news via GPT-4o-mini."""
+    """Score le sentiment des news via Gemini."""
 
-    def __init__(self, db: Database, model: str = "gpt-4o-mini"):
+    def __init__(self, db: Database, model: str = "gemini-2.0-flash-lite"):
         self.db = db
         self.model = model
 
-    def _get_openai_client(self) -> OpenAI:
-        """Cree un client OpenAI avec la cle du .env."""
-        api_key = os.getenv("OPENAI_API_KEY")
+    def _get_client(self) -> genai.Client:
+        """Cree un client Gemini avec la cle du .env."""
+        api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("OPENAI_API_KEY manquante dans .env")
-        return OpenAI(api_key=api_key)
+            raise ValueError("GEMINI_API_KEY manquante dans .env")
+        return genai.Client(api_key=api_key)
 
     def _build_prompt(self, title: str, description: str) -> str:
         """Construit le prompt de scoring sentiment."""
@@ -53,7 +54,7 @@ class LLMSentimentScorer:
     def _parse_response(self, response_text: str) -> float | None:
         """Parse la reponse JSON du LLM. Retourne le sentiment ou None."""
         cleaned = response_text.strip()
-        # GPT-4o-mini enveloppe parfois dans ```json ... ```
+        # Le LLM enveloppe parfois dans ```json ... ```
         if cleaned.startswith("```"):
             lines = cleaned.split("\n")
             lines = [l for l in lines if not l.strip().startswith("```")]
@@ -78,16 +79,18 @@ class LLMSentimentScorer:
         news_id = news["id"]
 
         prompt = self._build_prompt(title, description)
-        client = self._get_openai_client()
+        client = self._get_client()
 
-        response = client.chat.completions.create(
+        response = client.models.generate_content(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=50,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                max_output_tokens=50,
+            ),
         )
 
-        response_text = response.choices[0].message.content
+        response_text = response.text
         sentiment = self._parse_response(response_text)
 
         if sentiment is not None:

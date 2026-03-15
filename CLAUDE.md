@@ -29,7 +29,7 @@ uv run python scripts/train_model.py               # Entrainer le modele + evalu
 uv run python scripts/train_model.py --features     # Explorer les features
 uv run python scripts/analyze_features.py           # Stats gagnants vs perdants
 uv run python scripts/analyze_features.py --trade 42  # Features d'un trade specifique
-uv run python scripts/analyze_trades_llm.py           # Analyser trades via GPT-4o-mini
+uv run python scripts/analyze_trades_llm.py           # Analyser trades via Gemini
 uv run python scripts/analyze_trades_llm.py --trade 42  # Analyser un trade specifique
 uv run python scripts/analyze_trades_llm.py --stats     # Stats des analyses LLM
 uv run python scripts/run_scanner.py           # Lancer le scanner (boucle infinie)
@@ -96,7 +96,7 @@ core (fondation, 0 deps internes)
 | Prix | yfinance |
 | News | gnews, Alpha Vantage API, Marketaux API, RSS (feedparser) |
 | ML | xgboost, scikit-learn |
-| LLM | openai (GPT-4o-mini) |
+| LLM | google-genai (Gemini 2.0 Flash Lite) |
 | Indicateurs techniques | ta (RSI, MACD, Bollinger, ATR) |
 | Scheduler | APScheduler 3.x |
 | Telegram | python-telegram-bot 22.x |
@@ -140,7 +140,7 @@ SQLite dans `data/trades.db`. Tables principales (12 tables):
 | Aspect | Status | Details |
 |--------|--------|---------|
 | Code | Etape 1-7 DONE + feedback loop corrige | 5 bugs critiques corriges le 12 mars 2026. Modele retraine sur dataset equilibre (90W/155L). Scanner tourne sur VPS avec 13 jobs. |
-| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + OPENAI_API_KEY (nouvelle cle 12 mars) + NEWSDATA_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
+| Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + GEMINI_API_KEY + NEWSDATA_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
 | Tests | 405/405 PASS | database(59), pdf_parser(17), trade_matcher(7), ticker_mapper(11), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(38), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6), predictor(10), signal_filter(13), formatter(7), telegram_bot(4), signal_reviewer(32), performance_tracker(29), model_retrainer(25), orderbook_collector(9) |
 | Data VPS | 202 signaux, 134 reviews, 7132 news, 2702 prix, 6943 orderbook | Win rate global: 16.4% (22W 84L 28N). Modele retraine le 12 mars sur dataset equilibre. |
 | Docs | Design + plans Etapes 2-5 + fix feedback loop | docs/plans/2026-03-12-fix-feedback-loop.md |
@@ -158,7 +158,7 @@ SQLite dans `data/trades.db`. Tables principales (12 tables):
 | Newsdata.io | newsdata_collector.py | nouveau | Oui (natif) | Oui (.env) |
 | Boursorama (delistes) | boursorama_scraper.py | prix | - | Non |
 | yfinance fondamentaux | fundamental_collector.py | PE/PB/analysts | - | Non |
-| LLM Sentiment | llm_sentiment.py | scorer ~1081 news | GPT-4o-mini | Oui (.env) |
+| LLM Sentiment | llm_sentiment.py | scorer ~1081 news | Gemini Flash Lite | Oui (.env) |
 | Boursorama Orderbook | orderbook_collector.py | carnet d'ordres | - | Non |
 
 **Tickers sans prix yfinance (delistes, fallback Boursorama):** 2CRSI.PA, ALTBG.PA, AFYREN.PA

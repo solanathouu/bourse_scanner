@@ -11,7 +11,7 @@ from src.analysis.llm_sentiment import LLMSentimentScorer
 
 
 class TestLLMSentimentScorer:
-    """Tests du scoring sentiment (OpenAI mocke)."""
+    """Tests du scoring sentiment (Gemini mocke)."""
 
     def setup_method(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -56,15 +56,14 @@ class TestLLMSentimentScorer:
         result = self.scorer._parse_response("pas du JSON")
         assert result is None
 
-    @patch.object(LLMSentimentScorer, "_get_openai_client")
+    @patch.object(LLMSentimentScorer, "_get_client")
     def test_score_news_updates_db(self, mock_client_method):
-        """score_news appelle OpenAI et met a jour la base."""
+        """score_news appelle Gemini et met a jour la base."""
         # Setup mock
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '{"sentiment": 0.6}'
+        mock_response.text = '{"sentiment": 0.6}'
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.models.generate_content.return_value = mock_response
         mock_client_method.return_value = mock_client
 
         # Inserer une news sans sentiment

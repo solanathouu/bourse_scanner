@@ -194,7 +194,7 @@ class TestParseResponse:
 
 
 class TestAnalyzeTrade:
-    """Tests d'analyse d'un trade (avec mock OpenAI)."""
+    """Tests d'analyse d'un trade (avec mock Gemini)."""
 
     def setup_method(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -206,29 +206,29 @@ class TestAnalyzeTrade:
     def teardown_method(self):
         self.temp_dir.cleanup()
 
-    @patch("src.analysis.llm_analyzer.OpenAI")
-    def test_analyze_trade_calls_openai(self, mock_openai_cls):
-        """analyze_trade appelle l'API OpenAI et sauvegarde le resultat."""
+    @patch.object(LLMAnalyzer, "_get_client")
+    def test_analyze_trade_calls_gemini(self, mock_client_method):
+        """analyze_trade appelle l'API Gemini et sauvegarde le resultat."""
+        mock_response = MagicMock()
+        mock_response.text = json.dumps({
+            "primary_news_index": 1,
+            "catalyst_type": "EARNINGS",
+            "catalyst_confidence": 0.9,
+            "catalyst_summary": "Resultats T2 solides",
+            "news_sentiment": 0.7,
+            "buy_reason": "CA en hausse",
+            "sell_reason": "Objectif atteint",
+            "trade_quality": "BON",
+        })
         mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content=json.dumps({
-                "primary_news_index": 1,
-                "catalyst_type": "EARNINGS",
-                "catalyst_confidence": 0.9,
-                "catalyst_summary": "Resultats T2 solides",
-                "news_sentiment": 0.7,
-                "buy_reason": "CA en hausse",
-                "sell_reason": "Objectif atteint",
-                "trade_quality": "BON",
-            })))]
-        )
+        mock_client.models.generate_content.return_value = mock_response
+        mock_client_method.return_value = mock_client
 
         trades = self.db.get_all_trades()
         self.analyzer.analyze_trade(trades[0])
 
         # Verifie que l'API a ete appelee
-        mock_client.chat.completions.create.assert_called_once()
+        mock_client.models.generate_content.assert_called_once()
 
         # Verifie que le resultat est en base
         result = self.db.get_trade_analysis(trades[0]["id"])
@@ -243,7 +243,7 @@ class TestAnalyzeTrade:
             "catalyst_type": "EARNINGS", "catalyst_summary": "deja fait",
             "catalyst_confidence": 0.9, "news_sentiment": 0.7,
             "buy_reason": "x", "sell_reason": "x",
-            "trade_quality": "BON", "model_used": "gpt-4o-mini",
+            "trade_quality": "BON", "model_used": "gemini-2.0-flash-lite",
             "analyzed_at": "2026-02-24 19:00:00",
         })
         trades = self.db.get_all_trades()

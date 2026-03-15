@@ -1,7 +1,7 @@
-"""Analyse LLM des trades de Nicolas via GPT-4o-mini.
+"""Analyse LLM des trades de Nicolas via Gemini Flash Lite.
 
 Pour chaque trade, envoie le contexte complet (news, indicateurs techniques,
-infos du trade) a GPT-4o-mini et recupere une analyse structuree du catalyseur,
+infos du trade) a Gemini et recupere une analyse structuree du catalyseur,
 de la raison d'achat/vente, et de la qualite du trade.
 """
 
@@ -11,7 +11,8 @@ from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from loguru import logger
-from openai import OpenAI
+from google import genai
+from google.genai import types
 
 from src.core.database import Database
 from src.data_collection.ticker_mapper import TickerMapper, TickerNotFoundError
@@ -65,21 +66,21 @@ Reponds UNIQUEMENT avec le JSON, sans texte autour."""
 
 
 class LLMAnalyzer:
-    """Analyse les trades de Nicolas via GPT-4o-mini."""
+    """Analyse les trades de Nicolas via Gemini."""
 
-    def __init__(self, db: Database, model: str = "gpt-4o-mini"):
+    def __init__(self, db: Database, model: str = "gemini-2.0-flash-lite"):
         self.db = db
         self.model = model
         self.mapper = TickerMapper()
         self.tech = TechnicalIndicators()
         self._price_cache: dict[str, object] = {}
 
-    def _get_openai_client(self) -> OpenAI:
-        """Cree un client OpenAI avec la cle du .env."""
-        api_key = os.getenv("OPENAI_API_KEY")
+    def _get_client(self) -> genai.Client:
+        """Cree un client Gemini avec la cle du .env."""
+        api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("OPENAI_API_KEY manquante dans .env")
-        return OpenAI(api_key=api_key)
+            raise ValueError("GEMINI_API_KEY manquante dans .env")
+        return genai.Client(api_key=api_key)
 
     def _get_enriched_prices(self, ticker: str):
         """Recupere les prix enrichis (avec cache)."""
@@ -212,11 +213,10 @@ class LLMAnalyzer:
             "analyzed_at": now,
         }
 
-        # Nettoyer le texte (GPT-4o-mini enveloppe parfois dans ```json ... ```)
+        # Nettoyer le texte (le LLM enveloppe parfois dans ```json ... ```)
         cleaned = response_text.strip()
         if cleaned.startswith("```"):
             lines = cleaned.split("\n")
-            # Retirer premiere et derniere ligne (```json et ```)
             lines = [l for l in lines if not l.strip().startswith("```")]
             cleaned = "\n".join(lines).strip()
 
@@ -266,7 +266,7 @@ class LLMAnalyzer:
         }
 
     def analyze_trade(self, trade: dict) -> bool:
-        """Analyse un trade via GPT-4o-mini. Retourne False si skip (deja fait)."""
+        """Analyse un trade via Gemini. Retourne False si skip (deja fait)."""
         trade_id = trade["id"]
 
         # Reprise incrementale
@@ -278,15 +278,17 @@ class LLMAnalyzer:
         _, news_list = self._get_news_context(trade)
         prompt = self.build_prompt(trade)
 
-        client = self._get_openai_client()
-        response = client.chat.completions.create(
+        client = self._get_client()
+        response = client.models.generate_content(
             model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=500,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=500,
+            ),
         )
 
-        response_text = response.choices[0].message.content
+        response_text = response.text
         analysis = self.parse_response(response_text, trade_id, news_list)
         self.db.insert_trade_analysis(analysis)
 
