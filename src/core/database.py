@@ -274,11 +274,16 @@ class Database:
         conn.commit()
 
     def _migrate_signals_columns(self, conn: sqlite3.Connection):
-        """Ajoute la colonne signal_price a la table signals si absente."""
+        """Ajoute les colonnes signal_price et model_version a la table signals."""
         existing = [row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()]
         if "signal_price" not in existing:
             conn.execute("ALTER TABLE signals ADD COLUMN signal_price REAL")
             logger.info("Migration: colonne 'signal_price' ajoutee a la table signals")
+        if "model_version" not in existing:
+            conn.execute("ALTER TABLE signals ADD COLUMN model_version TEXT")
+            # Backfill: tous les signaux existants sont du modele v1
+            conn.execute("UPDATE signals SET model_version = 'v1' WHERE model_version IS NULL")
+            logger.info("Migration: colonne 'model_version' ajoutee + backfill v1")
         conn.commit()
 
     def _migrate_orderbook_columns(self, conn: sqlite3.Connection):
@@ -701,13 +706,16 @@ class Database:
         conn.execute("""
             INSERT OR IGNORE INTO signals
                 (ticker, date, score, catalyst_type,
-                 catalyst_news_title, features_json, sent_at, signal_price)
+                 catalyst_news_title, features_json, sent_at, signal_price,
+                 model_version)
             VALUES
                 (:ticker, :date, :score, :catalyst_type,
-                 :catalyst_news_title, :features_json, :sent_at, :signal_price)
+                 :catalyst_news_title, :features_json, :sent_at, :signal_price,
+                 :model_version)
         """, {
             "catalyst_type": None, "catalyst_news_title": None,
             "features_json": None, "sent_at": None, "signal_price": None,
+            "model_version": None,
             **signal,
         })
         conn.commit()

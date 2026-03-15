@@ -84,7 +84,7 @@ async def dashboard_home(request: Request):
         signals_rows = conn.execute("""
             SELECT s.id, s.ticker, s.date, s.score, s.catalyst_type,
                    s.catalyst_news_title, s.signal_price, s.sent_at,
-                   sr.outcome, sr.performance_pct
+                   s.model_version, sr.outcome, sr.performance_pct
             FROM signals s
             LEFT JOIN signal_reviews sr ON sr.signal_id = s.id
             ORDER BY s.date DESC LIMIT 20
@@ -191,7 +191,8 @@ async def signal_detail(request: Request, signal_id: int):
 
 
 @app.get("/portfolio", response_class=HTMLResponse)
-async def portfolio(request: Request, filter: str = Query(default="all")):
+async def portfolio(request: Request, filter: str = Query(default="all"),
+                    version: str = Query(default="all")):
     """Portefeuille virtuel: performance cumulee des signaux reviewes."""
     conn = _get_conn()
     try:
@@ -201,22 +202,36 @@ async def portfolio(request: Request, filter: str = Query(default="all")):
         ).fetchall()
         catalyst_types = [r["catalyst_type"] for r in cat_rows]
 
+        version_rows = conn.execute(
+            "SELECT DISTINCT model_version FROM signals "
+            "WHERE model_version IS NOT NULL ORDER BY model_version"
+        ).fetchall()
+        model_versions = [r["model_version"] for r in version_rows]
+
+        conditions = []
+        params = []
         if filter == "confirmed":
-            where = "WHERE sr.outcome = 'WIN'"
+            conditions.append("sr.outcome = 'WIN'")
         elif filter not in ("all", "confirmed", None):
-            where = "WHERE sr.catalyst_type = ?"
-        else:
-            where = ""
+            conditions.append("sr.catalyst_type = ?")
+            params.append(filter)
+        if version != "all":
+            conditions.append("s.model_version = ?")
+            params.append(version)
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
 
         query = f"""
             SELECT sr.signal_id, sr.ticker, sr.signal_date, sr.signal_price,
-                   sr.review_price, sr.performance_pct, sr.outcome, sr.catalyst_type
-            FROM signal_reviews sr {where} ORDER BY sr.signal_date
+                   sr.review_price, sr.performance_pct, sr.outcome, sr.catalyst_type,
+                   s.model_version
+            FROM signal_reviews sr
+            JOIN signals s ON sr.signal_id = s.id
+            {where} ORDER BY sr.signal_date
         """
-        if filter not in ("all", "confirmed", None):
-            trades_rows = conn.execute(query, (filter,)).fetchall()
-        else:
-            trades_rows = conn.execute(query).fetchall()
+        trades_rows = conn.execute(query, params).fetchall()
         trades = _rows_to_dicts(trades_rows)
     finally:
         conn.close()
@@ -244,6 +259,7 @@ async def portfolio(request: Request, filter: str = Query(default="all")):
         "capital_cumul": round(capital, 2),
         "trade_amount": int(TRADE_AMOUNT),
         "selected_filter": filter, "catalyst_types": catalyst_types,
+        "selected_version": version, "model_versions": model_versions,
     })
 
 

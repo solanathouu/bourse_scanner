@@ -121,6 +121,8 @@ class SignalFilter:
     def record_signal(self, signal: dict):
         """Enregistre un signal en BDD apres envoi."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        active_model = self.db.get_active_model_version()
+        model_version = active_model["version"] if active_model else "v1"
         self.db.insert_signal({
             "ticker": signal["ticker"],
             "date": signal["date"],
@@ -130,5 +132,6 @@ class SignalFilter:
             "catalyst_news_title": signal.get("catalyst_news_title"),
             "features_json": signal.get("features_json"),
             "sent_at": now,
+            "model_version": model_version,
         })
-        logger.info(f"Signal enregistre: {signal['ticker']} score={signal['score']:.2f}")
+        logger.info(f"Signal enregistre: {signal['ticker']} score={signal['score']:.2f} ({model_version})")

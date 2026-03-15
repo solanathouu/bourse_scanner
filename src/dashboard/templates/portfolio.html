@@ -6,7 +6,13 @@
 <h1>Portfolio virtuel</h1>
 <p style="color:#888; margin-bottom:16px">Simulation : {{ trade_amount }} EUR par trade, achat au signal, vente a J+3. Purement indicatif.</p>
 
-<form method="get" action="/portfolio" style="margin-bottom: 16px;">
+<form method="get" action="/portfolio" style="margin-bottom: 16px; display:flex; gap:12px; align-items:center;">
+    <select name="version" onchange="this.form.submit()">
+        <option value="all" {% if selected_version == 'all' %}selected{% endif %}>Toutes les versions</option>
+        {% for v in model_versions %}
+        <option value="{{ v }}" {% if selected_version == v %}selected{% endif %}>Modele {{ v }}</option>
+        {% endfor %}
+    </select>
     <select name="filter" onchange="this.form.submit()">
         <option value="all" {% if selected_filter == 'all' %}selected{% endif %}>Tous les signaux</option>
         <option value="confirmed" {% if selected_filter == 'confirmed' %}selected{% endif %}>WIN uniquement</option>
