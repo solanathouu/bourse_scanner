@@ -1,6 +1,7 @@
 """Re-entrainement du modele avec backup et validation.
 
-Ne remplace le modele actif que si le nouveau est strictement meilleur.
+Deploie le nouveau modele si son f1 depasse un seuil minimum.
+Le retrain quotidien permet au modele d'apprendre en continu.
 """
 
 import os
@@ -10,6 +11,8 @@ from datetime import datetime
 from loguru import logger
 
 from src.core.database import Database
+
+MIN_F1_THRESHOLD = 0.25
 
 
 class ModelRetrainer:
@@ -35,9 +38,13 @@ class ModelRetrainer:
         current_model_path: str,
         new_model_dir: str = "data/models",
     ) -> dict:
-        """Retrain model, compare with current, deploy only if better.
+        """Retrain et deployer si f1 du nouveau modele >= seuil minimum.
 
-        Returns dict with: deployed (bool), old_metrics, new_metrics, backup_path,
+        Le nouveau modele est entraine sur les donnees combinees (trades
+        historiques + signal reviews). Il est deploye si son f1 >= 0.25.
+        Plus besoin de comparer avec l'ancien (qui etait biaise).
+
+        Returns dict with: deployed (bool), new_metrics, backup_path,
         and optionally new_path and version if deployed.
         """
         from src.analysis.feature_engine import FeatureEngine
@@ -45,23 +52,13 @@ class ModelRetrainer:
 
         backup_path = self._backup_model(current_model_path)
 
-        # Load old model and evaluate via walk-forward
-        old_trainer = Trainer()
-        old_trainer.load_model(current_model_path)
-
         engine = FeatureEngine(self.db)
         features_df = engine.build_combined_features()
 
         if len(features_df) < 20:
             return {"deployed": False, "reason": "not_enough_data"}
 
-        old_results = old_trainer.walk_forward_validate(features_df)
-        old_metrics = {
-            k: old_results.get(k, 0)
-            for k in ["accuracy", "precision", "recall", "f1"]
-        }
-
-        # Train new model
+        # Entrainer le nouveau modele
         new_trainer = Trainer()
         X, y = new_trainer.prepare_data(features_df)
         new_trainer.train(X, y)
@@ -71,18 +68,16 @@ class ModelRetrainer:
             for k in ["accuracy", "precision", "recall", "f1"]
         }
 
-        is_better = self._is_new_model_better(old_metrics, new_metrics)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         stats = self.db.get_review_stats()
 
         result = {
-            "deployed": is_better,
-            "old_metrics": old_metrics,
+            "deployed": False,
             "new_metrics": new_metrics,
             "backup_path": backup_path,
         }
 
-        if is_better:
+        if new_metrics["f1"] >= MIN_F1_THRESHOLD:
             version = self._next_version()
             new_path = os.path.join(new_model_dir, f"nicolas_{version}.joblib")
             new_trainer.save_model(new_path)
@@ -96,23 +91,20 @@ class ModelRetrainer:
                 "recall": new_metrics["recall"],
                 "f1": new_metrics["f1"],
                 "is_active": 0,
-                "notes": (
-                    f"Retrained, f1 {old_metrics['f1']:.3f}"
-                    f" -> {new_metrics['f1']:.3f}"
-                ),
+                "notes": f"Retrained on {len(features_df)} samples, f1={new_metrics['f1']:.3f}",
             })
             versions = self.db.get_all_model_versions()
             new_v = [v for v in versions if v["version"] == version][0]
             self.db.set_active_model(new_v["id"])
-            result.update({"new_path": new_path, "version": version})
+            result.update({"deployed": True, "new_path": new_path, "version": version})
             logger.info(
-                f"Nouveau modele deploye: {version} "
-                f"(f1 {old_metrics['f1']:.3f} -> {new_metrics['f1']:.3f})"
+                f"Modele {version} deploye "
+                f"(f1={new_metrics['f1']:.3f}, {len(features_df)} samples)"
             )
         else:
+            result["reason"] = "f1_too_low"
             logger.info(
-                f"Ancien modele conserve "
-                f"(f1 {old_metrics['f1']:.3f} vs {new_metrics['f1']:.3f})"
+                f"Modele non deploye: f1={new_metrics['f1']:.3f} < {MIN_F1_THRESHOLD}"
             )
 
         return result
@@ -128,9 +120,9 @@ class ModelRetrainer:
         logger.debug(f"Backup modele: {backup_path}")
         return backup_path
 
-    def _is_new_model_better(self, old_metrics: dict, new_metrics: dict) -> bool:
-        """New model must have >= 1% higher f1 to be considered better."""
-        return (new_metrics.get("f1", 0) - old_metrics.get("f1", 0)) >= 0.01
+    def _meets_min_quality(self, metrics: dict) -> bool:
+        """Le nouveau modele doit avoir un f1 >= seuil minimum."""
+        return metrics.get("f1", 0) >= MIN_F1_THRESHOLD
 
     def _next_version(self) -> str:
         """Determine next version number (v2, v3, ...)."""
@@ -148,7 +140,6 @@ class ModelRetrainer:
 
     def format_retrain_report(self, result: dict) -> str:
         """Format retrain report as HTML for Telegram."""
-        old = result.get("old_metrics", {})
         new = result.get("new_metrics", {})
         lines = ["<b>Re-entrainement du modele</b>", ""]
 
@@ -157,15 +148,13 @@ class ModelRetrainer:
                 f"Nouveau modele deploye: {result.get('version', '?')}"
             )
         else:
-            lines.append(
-                "Ancien modele conserve (nouveau pas assez meilleur)"
-            )
+            reason = result.get("reason", "unknown")
+            lines.append(f"Modele non deploye ({reason})")
 
-        lines.extend(["", "Metriques comparees:"])
+        lines.extend(["", "Metriques:"])
         for metric in ["accuracy", "precision", "recall", "f1"]:
-            old_v = old.get(metric, 0)
-            new_v = new.get(metric, 0)
-            lines.append(f"  {metric.capitalize()}: {old_v:.1%} -> {new_v:.1%}")
+            val = new.get(metric, 0)
+            lines.append(f"  {metric.capitalize()}: {val:.1%}")
 
         lines.extend(["", f"Backup: {result.get('backup_path', 'N/A')}"])
         return "\n".join(lines)

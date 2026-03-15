@@ -422,6 +422,8 @@ class FeatureEngine:
 
         news_list = self.db.get_news_in_window(ticker, date_start, date)
 
+        feedback = self._build_feedback_features(ticker, "TECHNICAL")
+
         default = {
             "catalyst_type": "TECHNICAL",
             "catalyst_confidence": 0.0,
@@ -429,6 +431,7 @@ class FeatureEngine:
             "has_clear_catalyst": 0,
             "buy_reason_length": 0,
             "best_news_title": None,
+            **feedback,
         }
 
         if not news_list:
@@ -452,6 +455,7 @@ class FeatureEngine:
             explanation = summary.get("best_explanation") or ""
             title = summary.get("best_news_title") or ""
 
+            feedback = self._build_feedback_features(ticker, cat_type)
             return {
                 "catalyst_type": cat_type,
                 "catalyst_confidence": summary["catalyst_confidence"],
@@ -459,6 +463,7 @@ class FeatureEngine:
                 "has_clear_catalyst": summary["has_clear_catalyst"],
                 "buy_reason_length": len(explanation) or len(title),
                 "best_news_title": title,
+                **feedback,
             }
         except Exception as e:
             logger.warning(f"LLM classification {ticker} echouee, fallback regex: {e}")
@@ -470,6 +475,7 @@ class FeatureEngine:
         cat_type = best.get("catalyst_type", "UNKNOWN")
         has_catalyst = 1 if cat_type not in ("TECHNICAL", "UNKNOWN") else 0
 
+        feedback = self._build_feedback_features(ticker, cat_type)
         return {
             "catalyst_type": cat_type,
             "catalyst_confidence": 0.5 if has_catalyst else 0.0,
@@ -477,6 +483,33 @@ class FeatureEngine:
             "has_clear_catalyst": has_catalyst,
             "buy_reason_length": len(best.get("title", "")),
             "best_news_title": best.get("title"),
+            **feedback,
+        }
+
+    def _build_feedback_features(self, ticker: str, catalyst_type: str) -> dict:
+        """Construit les features de feedback a partir des reviews passees.
+
+        Permet au modele d'apprendre quels types de catalyseurs et quels
+        tickers ont historiquement bien fonctionne dans les signaux du bot.
+        """
+        reviews = self.db.get_signal_reviews()
+
+        # Win rate par type de catalyseur
+        cat_reviews = [r for r in reviews if r.get("catalyst_type") == catalyst_type]
+        cat_wins = sum(1 for r in cat_reviews if r["outcome"] == "WIN")
+        cat_total = len(cat_reviews)
+        cat_wr = cat_wins / cat_total if cat_total > 0 else 0.0
+
+        # Win rate par ticker
+        ticker_reviews = [r for r in reviews if r["ticker"] == ticker]
+        ticker_wins = sum(1 for r in ticker_reviews if r["outcome"] == "WIN")
+        ticker_total = len(ticker_reviews)
+        ticker_wr = ticker_wins / ticker_total if ticker_total > 0 else 0.0
+
+        return {
+            "catalyst_historical_win_rate": round(cat_wr, 4),
+            "catalyst_historical_sample_size": cat_total,
+            "ticker_historical_win_rate": round(ticker_wr, 4),
         }
 
     def _build_realtime_context_features(self, ticker: str, date: str) -> dict:

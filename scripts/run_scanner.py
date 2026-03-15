@@ -599,17 +599,17 @@ def run_scheduler(dry_run: bool = False):
         name="Update regles",
     )
 
-    # Job 11: Check retrain — dimanche 19h
+    # Job 11: Check retrain — quotidien a 19h (lun-ven)
     scheduler.add_job(
         check_retrain,
         CronTrigger(
             hour=feedback_config.get("retrain_hour", 19),
             minute=0,
-            day_of_week=feedback_config.get("retrain_day", "sun"),
+            day_of_week="mon-fri",
         ),
         args=[db, config, telegram, dry_run, predictor],
         id="check_retrain",
-        name="Check retrain",
+        name="Check retrain quotidien",
     )
 
     # Job 12: Resume hebdo — dimanche 20h
@@ -663,7 +663,7 @@ def run_scheduler(dry_run: bool = False):
     print(f"  - LLM Sentiment: toutes les {sched_config.get('sentiment_interval_min', 120)} min")
     print(f"  - Review J+3: quotidien a {feedback_config.get('review_hour', 18)}h")
     print(f"  - Update regles: quotidien a {feedback_config.get('rules_update_hour', 18)}h30")
-    print(f"  - Check retrain: {feedback_config.get('retrain_day', 'dim')} a {feedback_config.get('retrain_hour', 19)}h")
+    print(f"  - Check retrain: quotidien a {feedback_config.get('retrain_hour', 19)}h (lun-ven)")
     print(f"  - Resume hebdo: {feedback_config.get('weekly_day', 'dim')} a {feedback_config.get('weekly_hour', 20)}h")
     print(f"  - Carnet d'ordres: toutes les {sched_config.get('orderbook_interval_min', 15)} min")
     print(f"\nCtrl+C pour arreter\n")

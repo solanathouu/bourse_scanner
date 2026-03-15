@@ -21,8 +21,19 @@ class AlertFormatter:
         price = signal.get("current_price")
         price_str = f"{price:.2f}" if price else "N/A"
 
+        # Tag confirme/experimental
+        catalyst_stats = signal.get("catalyst_stats", {})
+        cat_type = signal.get("catalyst_type", "UNKNOWN")
+        cat_stat = catalyst_stats.get(cat_type)
+        is_confirmed = (
+            cat_stat is not None
+            and cat_stat.get("total", 0) > 10
+            and cat_stat.get("win_rate", 0) > 0.25
+        )
+        tag = "CONFIRME" if is_confirmed else "EXPERIMENTAL"
+
         lines = [
-            f"<b>SIGNAL — {name} ({ticker})</b>",
+            f"<b>[{tag}] SIGNAL — {name} ({ticker})</b>",
             f"Score: {score_pct}% | Prix: {price_str} EUR",
             "",
         ]

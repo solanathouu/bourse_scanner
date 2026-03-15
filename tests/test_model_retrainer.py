@@ -166,42 +166,32 @@ class TestBackupModel:
         assert original == backup
 
 
-class TestCompareModels:
-    """Tests de _is_new_model_better (sans BDD)."""
+class TestMinQuality:
+    """Tests de _meets_min_quality (sans BDD)."""
 
     def setup_method(self):
         """Cree une instance sans passer par __init__."""
         self.retrainer = ModelRetrainer.__new__(ModelRetrainer)
 
-    def test_new_model_better(self):
-        """F1 superieur de >= 0.01 -> True."""
-        old = {"f1": 0.70, "accuracy": 0.80, "precision": 0.75, "recall": 0.65}
-        new = {"f1": 0.72, "accuracy": 0.82, "precision": 0.77, "recall": 0.67}
-        assert self.retrainer._is_new_model_better(old, new) is True
+    def test_f1_above_threshold(self):
+        """F1 >= 0.25 -> True."""
+        assert self.retrainer._meets_min_quality({"f1": 0.30}) is True
 
-    def test_new_model_worse(self):
-        """F1 inferieur -> False."""
-        old = {"f1": 0.75, "accuracy": 0.80, "precision": 0.75, "recall": 0.75}
-        new = {"f1": 0.70, "accuracy": 0.78, "precision": 0.72, "recall": 0.68}
-        assert self.retrainer._is_new_model_better(old, new) is False
+    def test_f1_below_threshold(self):
+        """F1 < 0.25 -> False."""
+        assert self.retrainer._meets_min_quality({"f1": 0.20}) is False
 
-    def test_marginal_improvement_not_enough(self):
-        """F1 diff < 0.01 -> False (pas assez d'amelioration)."""
-        old = {"f1": 0.750}
-        new = {"f1": 0.755}
-        assert self.retrainer._is_new_model_better(old, new) is False
-
-    def test_exact_threshold(self):
-        """F1 diff == 0.01 -> True (seuil exact)."""
-        old = {"f1": 0.70}
-        new = {"f1": 0.71}
-        assert self.retrainer._is_new_model_better(old, new) is True
+    def test_f1_exact_threshold(self):
+        """F1 == 0.25 -> True (seuil exact)."""
+        assert self.retrainer._meets_min_quality({"f1": 0.25}) is True
 
     def test_missing_f1_defaults_zero(self):
-        """Metriques manquantes traitees comme 0."""
-        old = {}
-        new = {"f1": 0.05}
-        assert self.retrainer._is_new_model_better(old, new) is True
+        """Metriques manquantes traitees comme 0 -> False."""
+        assert self.retrainer._meets_min_quality({}) is False
+
+    def test_high_f1(self):
+        """F1 eleve -> True."""
+        assert self.retrainer._meets_min_quality({"f1": 0.85}) is True
 
 
 class TestNextVersion:
@@ -277,16 +267,17 @@ class TestFormatReport:
         assert "deploye" in report.lower()
         assert "v3" in report
 
-    def test_not_deployed_report_contains_conserve(self):
-        """Rapport non deploye contient 'conserve'."""
+    def test_not_deployed_report_contains_reason(self):
+        """Rapport non deploye contient la raison."""
         result = {
             "deployed": False,
-            "old_metrics": {"accuracy": 0.80, "precision": 0.75, "recall": 0.70, "f1": 0.72},
-            "new_metrics": {"accuracy": 0.79, "precision": 0.74, "recall": 0.69, "f1": 0.71},
+            "reason": "f1_too_low",
+            "new_metrics": {"accuracy": 0.79, "precision": 0.74, "recall": 0.69, "f1": 0.21},
             "backup_path": "/tmp/backup.joblib",
         }
         report = self.retrainer.format_retrain_report(result)
-        assert "conserve" in report.lower()
+        assert "non deploye" in report.lower()
+        assert "f1_too_low" in report
 
     def test_report_contains_metrics(self):
         """Le rapport contient les metriques comparees."""

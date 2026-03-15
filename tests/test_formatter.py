@@ -86,6 +86,45 @@ class TestAlertFormatter:
         msg = self.formatter.format_signal(signal)
         assert "Feedback" not in msg
 
+    def test_format_signal_confirmed_tag(self):
+        """Un signal avec bon win rate affiche CONFIRME."""
+        signal = {
+            "ticker": "SAN.PA", "name": "SANOFI", "score": 0.85,
+            "current_price": 76.0, "catalyst_type": "EARNINGS",
+            "features": {},
+            "catalyst_stats": {
+                "EARNINGS": {"win_rate": 0.35, "wins": 7, "total": 20},
+            },
+        }
+        msg = self.formatter.format_signal(signal)
+        assert "CONFIRME" in msg
+
+    def test_format_signal_experimental_tag(self):
+        """Un signal avec mauvais win rate affiche EXPERIMENTAL."""
+        signal = {
+            "ticker": "SAN.PA", "name": "SANOFI", "score": 0.85,
+            "current_price": 76.0, "catalyst_type": "TECHNICAL",
+            "features": {},
+            "catalyst_stats": {
+                "TECHNICAL": {"win_rate": 0.10, "wins": 5, "total": 50},
+            },
+        }
+        msg = self.formatter.format_signal(signal)
+        assert "EXPERIMENTAL" in msg
+
+    def test_format_signal_experimental_low_sample(self):
+        """Un signal avec peu de samples est EXPERIMENTAL meme si bon win rate."""
+        signal = {
+            "ticker": "SAN.PA", "name": "SANOFI", "score": 0.85,
+            "current_price": 76.0, "catalyst_type": "EARNINGS",
+            "features": {},
+            "catalyst_stats": {
+                "EARNINGS": {"win_rate": 0.50, "wins": 3, "total": 6},
+            },
+        }
+        msg = self.formatter.format_signal(signal)
+        assert "EXPERIMENTAL" in msg
+
     def test_format_daily_summary(self):
         """Le resume quotidien liste les signaux."""
         signals = [

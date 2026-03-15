@@ -441,6 +441,74 @@ class TestBuildCombinedFeatures:
         assert review_ids[0] == -1
 
 
+class TestFeedbackFeatures:
+    """Tests des features de feedback historique."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "test.db")
+        self.db = Database(self.db_path)
+        self.db.init_db()
+        self.engine = FeatureEngine(self.db)
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def _insert_review(self, signal_id, ticker, outcome, catalyst_type="EARNINGS",
+                       signal_date="2026-03-01"):
+        """Helper pour inserer un signal + review."""
+        self.db.insert_signal({
+            "ticker": ticker, "date": signal_date,
+            "score": 0.80, "signal_price": 10.0,
+            "sent_at": f"{signal_date} 10:00:00",
+        })
+        perf = 6.0 if outcome == "WIN" else (-5.0 if outcome == "LOSS" else 2.0)
+        self.db.insert_signal_review({
+            "signal_id": signal_id, "ticker": ticker,
+            "signal_date": signal_date, "signal_price": 10.0,
+            "review_date": "2026-03-04", "review_price": 10.0 + perf / 10,
+            "performance_pct": perf, "outcome": outcome,
+            "failure_reason": None, "catalyst_type": catalyst_type,
+            "features_json": None, "reviewed_at": "2026-03-04 18:00:00",
+        })
+
+    def test_feedback_features_no_reviews(self):
+        """Sans reviews, les features feedback sont a 0."""
+        result = self.engine._build_feedback_features("SAN.PA", "EARNINGS")
+        assert result["catalyst_historical_win_rate"] == 0.0
+        assert result["catalyst_historical_sample_size"] == 0
+        assert result["ticker_historical_win_rate"] == 0.0
+
+    def test_feedback_features_with_reviews(self):
+        """Avec reviews, les features refletent le win rate."""
+        self._insert_review(1, "SAN.PA", "WIN", signal_date="2026-03-01")
+        self._insert_review(2, "SAN.PA", "LOSS", signal_date="2026-03-02")
+        self._insert_review(3, "SAN.PA", "LOSS", signal_date="2026-03-03")
+        result = self.engine._build_feedback_features("SAN.PA", "EARNINGS")
+        assert abs(result["catalyst_historical_win_rate"] - 1 / 3) < 0.01
+        assert result["catalyst_historical_sample_size"] == 3
+
+    def test_feedback_features_ticker_specific(self):
+        """Le win rate ticker est specifique au ticker."""
+        self._insert_review(1, "SAN.PA", "WIN", signal_date="2026-03-01")
+        self._insert_review(2, "DBV.PA", "LOSS", signal_date="2026-03-02")
+        san = self.engine._build_feedback_features("SAN.PA", "EARNINGS")
+        dbv = self.engine._build_feedback_features("DBV.PA", "EARNINGS")
+        assert san["ticker_historical_win_rate"] == 1.0
+        assert dbv["ticker_historical_win_rate"] == 0.0
+
+    def test_feedback_features_by_catalyst_type(self):
+        """Le win rate catalyseur est specifique au type."""
+        self._insert_review(1, "SAN.PA", "WIN", catalyst_type="EARNINGS",
+                            signal_date="2026-03-01")
+        self._insert_review(2, "SAN.PA", "LOSS", catalyst_type="TECHNICAL",
+                            signal_date="2026-03-02")
+        earnings = self.engine._build_feedback_features("SAN.PA", "EARNINGS")
+        tech = self.engine._build_feedback_features("SAN.PA", "TECHNICAL")
+        assert earnings["catalyst_historical_win_rate"] == 1.0
+        assert tech["catalyst_historical_win_rate"] == 0.0
+
+
 class TestOrderbookFeatures:
     """Tests pour les features du carnet d'ordres."""
 
