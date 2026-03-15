@@ -96,7 +96,8 @@ core (fondation, 0 deps internes)
 | Prix | yfinance |
 | News | gnews, Alpha Vantage API, Marketaux API, RSS (feedparser) |
 | ML | xgboost, scikit-learn |
-| LLM | google-genai (Gemini 2.0 Flash Lite) |
+| LLM | google-genai (Gemini 2.5 Flash Lite) |
+| Dashboard | FastAPI + Jinja2 + Chart.js (port 8050) |
 | Indicateurs techniques | ta (RSI, MACD, Bollinger, ATR) |
 | Scheduler | APScheduler 3.x |
 | Telegram | python-telegram-bot 22.x |
@@ -139,11 +140,12 @@ SQLite dans `data/trades.db`. Tables principales (12 tables):
 
 | Aspect | Status | Details |
 |--------|--------|---------|
-| Code | Etape 1-7 DONE + feedback loop corrige | 5 bugs critiques corriges le 12 mars 2026. Modele retraine sur dataset equilibre (90W/155L). Scanner tourne sur VPS avec 13 jobs. |
+| Code | Etape 1-7 DONE + refonte feedback loop 15 mars | LLM news classifier, feedback features, TP system, regime marche, modele simplifie, data leakage corrige. Dashboard FastAPI. |
 | Config | .env configure | ALPHA_VANTAGE_API_KEY + MARKETAUX_API_KEY + GEMINI_API_KEY + NEWSDATA_API_KEY + TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID |
-| Tests | 405/405 PASS | database(59), pdf_parser(17), trade_matcher(7), ticker_mapper(11), price_collector(5), news_collector(5), alpha_vantage(4), marketaux(5), rss(5), catalyst_matcher(22), news_classifier(24), technical_indicators(17), feature_engine(38), llm_analyzer(10), llm_sentiment(8), fundamental_collector(7), newsdata_collector(7), boursorama_scraper(7), trainer(10), evaluator(6), predictor(10), signal_filter(13), formatter(7), telegram_bot(4), signal_reviewer(32), performance_tracker(29), model_retrainer(25), orderbook_collector(9) |
-| Data VPS | 202 signaux, 134 reviews, 7132 news, 2702 prix, 6943 orderbook | Win rate global: 16.4% (22W 84L 28N). Modele retraine le 12 mars sur dataset equilibre. |
-| Docs | Design + plans Etapes 2-5 + fix feedback loop | docs/plans/2026-03-12-fix-feedback-loop.md |
+| Tests | 434/434 PASS | +16 llm_news_classifier, +4 feedback_features, +2 market_regime, +3 formatter, +4 signal_reviewer_tp |
+| Data VPS | 216 signaux, 157 reviews, 7570 news, 2756+ prix, 13168 orderbook | Win rate global: 16.6% (26W 94L 37N). Modele v3 actif (f1=0.316). |
+| Dashboard | http://31.97.196.120:8050 | 4 pages: accueil, news, signal, portfolio. Lecture seule. |
+| Docs | Plans + design specs | docs/plans/2026-03-15-*.md |
 | Git | Pushe sur origin | master a jour, VPS synchro |
 
 ## Sources de donnees actives
@@ -158,8 +160,10 @@ SQLite dans `data/trades.db`. Tables principales (12 tables):
 | Newsdata.io | newsdata_collector.py | nouveau | Oui (natif) | Oui (.env) |
 | Boursorama (delistes) | boursorama_scraper.py | prix | - | Non |
 | yfinance fondamentaux | fundamental_collector.py | PE/PB/analysts | - | Non |
-| LLM Sentiment | llm_sentiment.py | scorer ~1081 news | Gemini Flash Lite | Oui (.env) |
+| LLM Sentiment | llm_sentiment.py | scorer ~1081 news | Gemini 2.5 Flash Lite | Oui (.env) |
+| LLM News Classifier | llm_news_classifier.py | catalyseur + pertinence | Gemini 2.5 Flash Lite | Oui (.env) |
 | Boursorama Orderbook | orderbook_collector.py | carnet d'ordres | - | Non |
+| CAC40 Index | price_collector.py (^FCHI) | regime marche | - | Non |
 
 **Tickers sans prix yfinance (delistes, fallback Boursorama):** 2CRSI.PA, ALTBG.PA, AFYREN.PA
 
@@ -200,34 +204,38 @@ L'etape 4 (Feature Engineering + ML) doit:
 
 ## Changements recents (mars 2026)
 
-**9 mars — Philosophie: envoyer TOUT pour que le bot apprenne.** Le feedback loop sur-filtrait (EXCLUDE_CATALYST bloquait 96% des signaux). Corrige:
+**15 mars — Refonte majeure du feedback loop + dashboard:**
 
-1. **Filtrage debrided**: EXCLUDE_CATALYST remplace par CATALYST_STATS (informatif, pas bloquant).
-2. **Seuil abaisse a 0.50**: On envoie TOUS les signaux pour avoir des donnees negatives.
-3. **4 nouvelles sources dans le scheduler**: Alpha Vantage, Marketaux, Newsdata.io, LLM Sentiment. Total: 13 jobs.
-4. **Apprentissage continu**: `build_combined_features()` fusionne trades historiques + signal reviews.
-5. **Carnet d'ordres**: OrderBookCollector scrape Boursorama (31 symboles). 4 features orderbook.
+1. **Migration OpenAI -> Gemini 2.5 Flash Lite**: Modele LLM moins gourmand en tokens.
+2. **LLM News Classifier**: Remplace le regex NewsClassifier (73% UNKNOWN) par Gemini qui comprend semantiquement les news. Classifie le catalyseur + score de pertinence (filtre le bruit RSS). Cache en BDD.
+3. **Feedback loop auto-apprenant**:
+   - 3 features feedback injectees dans le modele: catalyst_historical_win_rate, catalyst_historical_sample_size, ticker_historical_win_rate
+   - Retrain quotidien (lun-ven 19h) au lieu d'hebdomadaire
+   - Deploiement si f1 >= 0.25 (plus de comparaison biaisee old/new)
+   - Tags [CONFIRME] / [EXPERIMENTAL] dans les alertes Telegram
+4. **Take Profit**: Review regarde le HIGH J+0 a J+3. Si high touche +4.5% = WIN (meme si le close redescend).
+5. **Regime marche**: Features CAC40 (trend SMA20, RSI marche, variation 5j) pour que le modele sache si on est en bull ou bear market.
+6. **Modele simplifie**: max_depth=2, regularisation (subsample, colsample, reg_lambda, min_child_weight). Evite l'overfitting sur 268 samples.
+7. **Data leakage corrige**: Le prompt LLM d'analyse des trades ne recoit plus le rendement ni le resultat.
+8. **Dashboard FastAPI**: http://31.97.196.120:8050 — 4 pages (accueil, news, signal detail, portfolio virtuel). Lecture seule, dark theme.
+9. **Tracking par version**: Chaque signal enregistre la version du modele. Portfolio filtrable par version.
+10. **Modele v3 deploye**: f1=0.316, precision=37.5%, accuracy=84%. Entraine sur 268 samples (111 trades + 157 reviews).
 
-**12 mars — 5 bugs critiques corriges (le bot n'apprenait pas):**
-
-1. **Orderbook parser**: `_parse_orderbook()` cherchait `data["bids"]` mais Boursorama renvoie `data["orderbook"]["lines"]` avec format `{bid, bidSize, bidNb, ask, askSize, askNb}`. 6943 snapshots etaient vides. Corrige.
-2. **Retrain crash KeyError date_achat**: `build_realtime_features()` ne retournait pas `date_achat`. Quand les reviews etaient combinees pour le retrain, la colonne manquait et `walk_forward_validate()` crashait. Corrige.
-3. **Walk-forward split_date hardcode**: `split_date="2025-12-01"` dans `trainer.py`. Pour 2026, tout etait dans le test set. Remplace par split dynamique (75e percentile).
-4. **catalyst_news_title toujours None**: Hardcode `None` dans `predictor.py`. Maintenant extrait de la meilleure news matchee.
-5. **Predictor ne rechargeait pas apres retrain**: Apres un retrain reussi, le scanner continuait avec l'ancien modele en memoire. Ajout de `reload_model()`.
-6. **Cle API OpenAI invalide sur VPS**: Remplacee par nouvelle cle.
-7. **Modele retraine**: Dataset equilibre 90 winners / 155 losers (etait 89% winners). Scores maintenant de 0.09 a 0.97 (etait 0.85-0.98 pour tout).
+**Regles absolues du projet:**
+- Ne JAMAIS supprimer de donnees d'entrainement (meme le bruit RSS sert au modele)
+- Envoyer TOUS les signaux sur Telegram (ne filtrer que quand le win rate sera assez haut)
+- Le dashboard est en LECTURE SEULE, aucune influence sur l'algorithme
 
 ## Next Immediate Action
 
-**Surveiller le bot et attendre les prochaines reviews.**
+**Laisser le bot tourner et surveiller via le dashboard.**
 
-Le bot tourne sur le VPS avec le modele retraine. Prochaines etapes:
-1. **Surveiller** les reviews J+3 des prochains jours — verifier que le win rate s'ameliore avec le nouveau modele
-2. **Verifier** que le LLM sentiment scorer fonctionne (nouvelle cle API OpenAI)
-3. **Verifier** que les orderbook features ne sont plus 0.0 (parser corrige, mais donnees seulement pendant horaires marche)
-4. **Dimanche 15 mars 19h**: Premier retrain automatique avec le cycle complet
-5. **Ameliorer** le retrainer: la comparaison old/new est biaisee (les deux modeles font le meme walk-forward, donc memes metriques)
+Le bot tourne sur le VPS avec le modele v3. Le feedback loop est autonome:
+1. **Lundi 17 mars**: Premiers signaux v3 emis pendant les heures de marche
+2. **Jeudi 20 mars**: Premieres reviews J+3 des signaux v3 (avec systeme TP)
+3. **Chaque soir 19h**: Retrain quotidien automatique (v4, v5, ...)
+4. **Dashboard**: http://31.97.196.120:8050 pour suivre en temps reel
+5. **Ne rien filtrer** tant que le win rate n'est pas assez haut (decision Nicolas)
 
 ## Donnees cles du trading
 
