@@ -188,22 +188,23 @@ class TestReviewPending:
             "signal_price": signal_price,
         })
 
-    def _insert_price(self, ticker: str, date: str, close: float):
-        """Helper: insere un prix en base."""
+    def _insert_price(self, ticker: str, date: str, close: float,
+                      high: float | None = None):
+        """Helper: insere un prix en base. high defaut = close."""
         self.db.insert_price({
             "ticker": ticker,
             "date": date,
             "open": close,
-            "high": close + 1,
+            "high": high if high is not None else close,
             "low": close - 1,
             "close": close,
             "volume": 10000,
         })
 
     def test_review_signal_with_price_at_j3(self):
-        """Signal + prix a J+3 = review complete avec outcome correct."""
+        """Signal + prix a J+3 avec TP touche (high=105 >= +4.5%) = WIN."""
         self._insert_signal("MC.PA", "2026-03-01", 0.85, signal_price=100.0)
-        self._insert_price("MC.PA", "2026-03-04", 105.0)  # J+3
+        self._insert_price("MC.PA", "2026-03-04", close=103.0, high=105.0)
 
         reviews = self.reviewer.review_pending("2026-03-05")
 
@@ -211,8 +212,7 @@ class TestReviewPending:
         review = reviews[0]
         assert review["ticker"] == "MC.PA"
         assert review["signal_price"] == 100.0
-        assert review["review_price"] == 105.0
-        assert review["performance_pct"] == 5.0
+        assert review["performance_pct"] == 4.5  # TP touche
         assert review["outcome"] == "WIN"
         assert review["signal_date"] == "2026-03-01"
         assert review["review_date"] == "2026-03-04"
@@ -317,11 +317,66 @@ class TestReviewPending:
     def test_review_stored_in_database(self):
         """La review est bien persistee dans la BDD."""
         self._insert_signal("MC.PA", "2026-03-01", 0.85, signal_price=100.0)
-        self._insert_price("MC.PA", "2026-03-04", 110.0)
+        # Close a +3% (pas WIN seul) mais high a +5% = TP touche
+        self._insert_price("MC.PA", "2026-03-04", close=103.0, high=105.0)
 
         self.reviewer.review_pending("2026-03-05")
 
         stored = self.db.get_signal_reviews("MC.PA")
         assert len(stored) == 1
-        assert stored[0]["performance_pct"] == 10.0
+        assert stored[0]["performance_pct"] == 4.5  # TP touche
         assert stored[0]["outcome"] == "WIN"
+
+    def test_tp_hit_at_j1_then_drop_at_j3(self):
+        """TP touche a J+1 (high >= +4.5%) puis rechute a J+3 = WIN."""
+        self._insert_signal("MC.PA", "2026-03-01", 0.85, signal_price=100.0)
+        # J+1: high touche 105 (+5%) mais close a 102
+        self._insert_price("MC.PA", "2026-03-02", close=102.0, high=105.0)
+        # J+2: redescend
+        self._insert_price("MC.PA", "2026-03-03", close=99.0, high=100.0)
+        # J+3: en dessous du signal -> serait LOSS sans TP
+        self._insert_price("MC.PA", "2026-03-04", close=97.0, high=98.0)
+
+        reviews = self.reviewer.review_pending("2026-03-05")
+
+        assert len(reviews) == 1
+        assert reviews[0]["outcome"] == "WIN"
+        assert reviews[0]["performance_pct"] == 4.5  # perf = seuil TP
+
+    def test_tp_not_hit_uses_close_j3(self):
+        """TP pas touche -> utilise le close a J+3 normalement."""
+        self._insert_signal("MC.PA", "2026-03-01", 0.85, signal_price=100.0)
+        # Highs ne touchent jamais +4.5%
+        self._insert_price("MC.PA", "2026-03-02", close=101.0, high=103.0)
+        self._insert_price("MC.PA", "2026-03-03", close=100.5, high=102.0)
+        self._insert_price("MC.PA", "2026-03-04", close=102.0, high=103.5)
+
+        reviews = self.reviewer.review_pending("2026-03-05")
+
+        assert len(reviews) == 1
+        assert reviews[0]["outcome"] == "NEUTRAL"  # +2% < 4.5%
+        assert reviews[0]["performance_pct"] == 2.0
+
+    def test_tp_hit_same_day(self):
+        """TP touche le jour meme du signal = WIN."""
+        self._insert_signal("MC.PA", "2026-03-01", 0.85, signal_price=100.0)
+        # J+0: high a 106 (+6%)
+        self._insert_price("MC.PA", "2026-03-01", close=103.0, high=106.0)
+        self._insert_price("MC.PA", "2026-03-04", close=95.0, high=96.0)
+
+        reviews = self.reviewer.review_pending("2026-03-05")
+
+        assert len(reviews) == 1
+        assert reviews[0]["outcome"] == "WIN"
+        assert reviews[0]["performance_pct"] == 4.5
+
+    def test_tp_hit_exactly_at_threshold(self):
+        """High exactement a +4.5% = WIN."""
+        self._insert_signal("MC.PA", "2026-03-01", 0.85, signal_price=100.0)
+        self._insert_price("MC.PA", "2026-03-02", close=101.0, high=104.5)
+        self._insert_price("MC.PA", "2026-03-04", close=99.0, high=100.0)
+
+        reviews = self.reviewer.review_pending("2026-03-05")
+
+        assert len(reviews) == 1
+        assert reviews[0]["outcome"] == "WIN"

@@ -1,7 +1,8 @@
-"""Review des signaux emis a J+3.
+"""Review des signaux emis a J+3 avec systeme de Take Profit.
 
-Compare le prix au moment du signal avec le prix 3 jours apres
-pour evaluer la qualite de chaque call.
+Si le prix HIGH touche +4.5% a n'importe quel moment entre J+0 et J+3,
+c'est un WIN (Nicolas aurait TP dans la realite). Le close a J+3 sert
+pour la performance finale si le TP n'a pas ete touche.
 """
 
 import json
@@ -13,7 +14,7 @@ from src.core.database import Database
 
 
 class SignalReviewer:
-    """Review les signaux a J+3 et enregistre les resultats."""
+    """Review les signaux a J+3 avec detection de Take Profit."""
 
     def __init__(self, db: Database, win_threshold: float = 4.5):
         self.db = db
@@ -38,18 +39,22 @@ class SignalReviewer:
             if review:
                 self.db.insert_signal_review(review)
                 reviews.append(review)
+                tp_tag = " (TP touche!)" if review.get("tp_hit") else ""
                 logger.info(
                     f"Review {signal['ticker']}: {review['outcome']} "
-                    f"({review['performance_pct']:+.2f}%)"
+                    f"({review['performance_pct']:+.2f}%){tp_tag}"
                 )
 
         logger.info(f"{len(reviews)}/{len(pending)} signaux reviewes")
         return reviews
 
     def _review_signal(self, signal: dict, current_date: str) -> dict | None:
-        """Review un signal individuel.
+        """Review un signal avec detection de TP.
 
-        Returns review dict or None if no price available.
+        Logique:
+        1. Regarder le HIGH de chaque jour entre J+0 et J+3
+        2. Si un HIGH atteint +4.5% vs signal_price -> WIN (TP touche)
+        3. Sinon, utiliser le close a J+3 pour la performance finale
         """
         ticker = signal["ticker"]
         signal_price = signal.get("signal_price")
@@ -58,16 +63,31 @@ class SignalReviewer:
             logger.warning(f"Signal {ticker} sans prix, skip review")
             return None
 
+        signal_dt = datetime.strptime(signal["date"], "%Y-%m-%d")
+        tp_price = signal_price * (1 + self.win_threshold / 100)
+
+        # Chercher si le TP a ete touche (HIGH >= tp_price) entre J+0 et J+5
+        tp_hit, tp_date, max_high = self._check_tp_hit(
+            ticker, signal["date"], signal_price,
+        )
+
+        # Prix de cloture a J+3 pour la perf finale si pas de TP
         review_price = self._get_review_price(ticker, signal["date"])
-        if review_price is None:
-            logger.warning(f"Pas de prix J+3 pour {ticker}, skip review")
+        if review_price is None and not tp_hit:
+            logger.warning(f"Pas de prix pour {ticker}, skip review")
             return None
 
-        perf = self._calculate_performance(signal_price, review_price)
-        outcome = self._classify_outcome(perf)
-        failure_reason = self._analyze_failure(signal, perf)
+        if tp_hit:
+            # TP touche — on considere qu'on a vendu au TP
+            perf = self.win_threshold
+            outcome = "WIN"
+            effective_review_price = tp_price
+        else:
+            effective_review_price = review_price
+            perf = self._calculate_performance(signal_price, review_price)
+            outcome = self._classify_outcome(perf)
 
-        signal_dt = datetime.strptime(signal["date"], "%Y-%m-%d")
+        failure_reason = self._analyze_failure(signal, perf) if outcome == "LOSS" else None
         review_date = (signal_dt + timedelta(days=3)).strftime("%Y-%m-%d")
 
         return {
@@ -76,14 +96,48 @@ class SignalReviewer:
             "signal_date": signal["date"],
             "signal_price": signal_price,
             "review_date": review_date,
-            "review_price": review_price,
+            "review_price": round(effective_review_price, 4),
             "performance_pct": round(perf, 2),
             "outcome": outcome,
             "failure_reason": failure_reason,
             "catalyst_type": signal.get("catalyst_type"),
             "features_json": signal.get("features_json"),
             "reviewed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "tp_hit": tp_hit,
         }
+
+    def _check_tp_hit(self, ticker: str, signal_date: str,
+                       signal_price: float) -> tuple[bool, str | None, float]:
+        """Verifie si le TP a ete touche entre J+0 et J+5.
+
+        Regarde le HIGH de chaque jour. Si HIGH >= signal_price * (1 + 4.5%),
+        le TP est touche.
+
+        Returns:
+            (tp_hit, tp_date, max_high_pct)
+        """
+        signal_dt = datetime.strptime(signal_date, "%Y-%m-%d")
+        # Fenetre J+0 a J+5 (pour couvrir les weekends)
+        date_start = signal_date
+        date_end = (signal_dt + timedelta(days=5)).strftime("%Y-%m-%d")
+
+        tp_target = signal_price * (1 + self.win_threshold / 100)
+        prices = self.db.get_prices(ticker)
+        candidates = [p for p in prices if date_start <= p["date"] <= date_end]
+        candidates.sort(key=lambda p: p["date"])
+
+        max_high = 0.0
+        for p in candidates:
+            high = p.get("high", 0)
+            if high <= 0:
+                continue
+            high_pct = (high - signal_price) / signal_price * 100
+            max_high = max(max_high, high_pct)
+
+            if high >= tp_target:
+                return True, p["date"], max_high
+
+        return False, None, max_high
 
     def _get_review_price(self, ticker: str, signal_date: str) -> float | None:
         """Get closing price around J+3 (window J+2 to J+5 for weekends)."""
@@ -98,14 +152,14 @@ class SignalReviewer:
         if not candidates:
             return None
 
-        # Pick the price closest to J+3
         candidates.sort(key=lambda p: abs(
             (datetime.strptime(p["date"], "%Y-%m-%d")
              - datetime.strptime(target_date, "%Y-%m-%d")).days
         ))
         return candidates[0]["close"]
 
-    def _calculate_performance(self, signal_price: float, review_price: float) -> float:
+    def _calculate_performance(self, signal_price: float,
+                                review_price: float) -> float:
         """Calcule la performance en pourcentage."""
         if signal_price <= 0:
             return 0.0
