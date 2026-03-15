@@ -3,47 +3,79 @@
 {% block title %}PEA Scanner &mdash; News{% endblock %}
 
 {% block content %}
-<h1>Actualit&eacute;s</h1>
+<h1>Actualites</h1>
 
-<div class="filter-bar">
-    <form method="get" action="/news">
-        <label for="ticker-filter">Filtrer par ticker :</label>
-        <select id="ticker-filter" name="ticker" onchange="this.form.submit()">
-            <option value="">Tous</option>
-            {% for t in tickers %}
-            <option value="{{ t }}" {% if t == current_ticker %}selected{% endif %}>{{ t }}</option>
+<form method="get" action="/news" style="margin-bottom: 16px;">
+    <select name="ticker" onchange="this.form.submit()">
+        <option value="">Tous les tickers</option>
+        {% for t in tickers %}
+        <option value="{{ t }}" {% if t == selected_ticker %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+    </select>
+</form>
+
+<div class="card">
+    <table>
+        <thead>
+            <tr>
+                <th>Date / Heure</th>
+                <th>Ticker</th>
+                <th>Titre</th>
+                <th>Sentiment</th>
+                <th>Catalyseur LLM</th>
+                <th>Pertinence</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for n in news_list %}
+            <tr style="cursor:pointer" onclick="window.location='/news/{{ n.id }}'">
+                <td style="white-space:nowrap; color:#888; font-size:13px">{{ n.published_at[:16] if n.published_at else '-' }}</td>
+                <td><span class="badge badge-ticker">{{ n.ticker }}</span></td>
+                <td>{{ n.title[:80] }}{% if n.title|length > 80 %}...{% endif %}</td>
+                <td>
+                    {% if n.sentiment is not none %}
+                        {% if n.sentiment > 0.3 %}
+                            <span class="badge badge-win">{{ "%+.1f"|format(n.sentiment) }}</span>
+                        {% elif n.sentiment < -0.3 %}
+                            <span class="badge badge-loss">{{ "%+.1f"|format(n.sentiment) }}</span>
+                        {% elif n.sentiment == 0.0 %}
+                            <span class="badge" style="background:#2d3436;color:#636e72">0.0</span>
+                        {% elif n.sentiment > 0 %}
+                            <span class="badge" style="background:#1e6e50;color:#a8e6cf">{{ "%+.1f"|format(n.sentiment) }}</span>
+                        {% else %}
+                            <span class="badge" style="background:#6e1e1e;color:#e6a8a8">{{ "%+.1f"|format(n.sentiment) }}</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="badge" style="background:#2d3436;color:#636e72">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if n.llm_catalyst_type %}
+                        <span class="badge badge-catalyst">{{ n.llm_catalyst_type }}</span>
+                    {% else %}
+                        <span style="color:#555">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if n.llm_relevance_score is not none %}
+                        {% if n.llm_relevance_score >= 0.7 %}
+                            <span style="color:#00b894">{{ "%.0f"|format(n.llm_relevance_score * 100) }}%</span>
+                        {% elif n.llm_relevance_score >= 0.3 %}
+                            <span style="color:#fdcb6e">{{ "%.0f"|format(n.llm_relevance_score * 100) }}%</span>
+                        {% else %}
+                            <span style="color:#e74c3c">{{ "%.0f"|format(n.llm_relevance_score * 100) }}%</span>
+                        {% endif %}
+                    {% else %}
+                        <span style="color:#555">-</span>
+                    {% endif %}
+                </td>
+            </tr>
             {% endfor %}
-        </select>
-    </form>
+        </tbody>
+    </table>
 </div>
 
-<div class="news-grid">
-    {% for news in news_list %}
-    <div class="news-card">
-        <div class="news-card-header">
-            <span class="ticker-badge">{{ news.ticker }}</span>
-            <span class="news-date">{{ news.date }}</span>
-        </div>
-        <a href="/news/{{ news.id }}" class="news-title">{{ news.title }}</a>
-        <div class="news-card-footer">
-            {% if news.sentiment is not none %}
-                {% if news.sentiment > 0.2 %}
-                    <span class="badge badge-win">Positif ({{ "%.2f"|format(news.sentiment) }})</span>
-                {% elif news.sentiment < -0.2 %}
-                    <span class="badge badge-loss">N&eacute;gatif ({{ "%.2f"|format(news.sentiment) }})</span>
-                {% else %}
-                    <span class="badge badge-neutral">Neutre ({{ "%.2f"|format(news.sentiment) }})</span>
-                {% endif %}
-            {% endif %}
-            {% if news.catalyst_type %}
-                <span class="badge badge-catalyst">{{ news.catalyst_type }}</span>
-            {% endif %}
-        </div>
-    </div>
-    {% endfor %}
-
-    {% if not news_list %}
-    <p class="empty-state">Aucune news trouv&eacute;e.</p>
-    {% endif %}
-</div>
+{% if not news_list %}
+<p style="color:#888; text-align:center; margin-top:24px">Aucune news trouvee.</p>
+{% endif %}
 {% endblock %}
