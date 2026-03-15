@@ -413,7 +413,7 @@ class FeatureEngine:
     def _build_realtime_catalyst_features(self, ticker: str, date: str) -> dict:
         """Construit les features catalyseur a partir des news recentes en BDD.
 
-        Regarde les news des 5 derniers jours, classifie avec NewsClassifier.
+        Utilise LLMNewsClassifier si disponible, sinon fallback regex NewsClassifier.
         """
         from datetime import timedelta
 
@@ -422,27 +422,52 @@ class FeatureEngine:
 
         news_list = self.db.get_news_in_window(ticker, date_start, date)
 
+        default = {
+            "catalyst_type": "TECHNICAL",
+            "catalyst_confidence": 0.0,
+            "news_sentiment": 0.0,
+            "has_clear_catalyst": 0,
+            "buy_reason_length": 0,
+            "best_news_title": None,
+        }
+
         if not news_list:
-            return {
-                "catalyst_type": "TECHNICAL",
-                "catalyst_confidence": 0.0,
-                "news_sentiment": 0.0,
-                "has_clear_catalyst": 0,
-                "buy_reason_length": 0,
-                "best_news_title": None,
-            }
+            return default
 
-        classifier = NewsClassifier()
-        classified = classifier.classify_batch(news_list)
-
-        # Trouver la news avec le catalyseur le plus prioritaire
-        best = max(classified, key=lambda n: n.get("sentiment") or 0.0)
-        cat_type = best.get("catalyst_type", "UNKNOWN")
-
-        # Sentiment moyen des news
+        # Sentiment moyen (toujours calcule)
         sentiments = [n.get("sentiment") or 0.0 for n in news_list]
         avg_sentiment = sum(sentiments) / len(sentiments) if sentiments else 0.0
 
+        # Essayer classification LLM (avec cache BDD)
+        try:
+            from src.analysis.llm_news_classifier import LLMNewsClassifier
+            llm_classifier = LLMNewsClassifier(self.db)
+            company_name = self.mapper.get_action_name(ticker) or ticker
+            classified = llm_classifier.classify_and_cache(
+                ticker, company_name, news_list,
+            )
+            summary = llm_classifier.summarize_for_realtime(classified)
+
+            cat_type = summary["catalyst_type"]
+            explanation = summary.get("best_explanation") or ""
+            title = summary.get("best_news_title") or ""
+
+            return {
+                "catalyst_type": cat_type,
+                "catalyst_confidence": summary["catalyst_confidence"],
+                "news_sentiment": round(avg_sentiment, 4),
+                "has_clear_catalyst": summary["has_clear_catalyst"],
+                "buy_reason_length": len(explanation) or len(title),
+                "best_news_title": title,
+            }
+        except Exception as e:
+            logger.warning(f"LLM classification {ticker} echouee, fallback regex: {e}")
+
+        # Fallback: regex NewsClassifier
+        classifier = NewsClassifier()
+        classified = classifier.classify_batch(news_list)
+        best = max(classified, key=lambda n: n.get("sentiment") or 0.0)
+        cat_type = best.get("catalyst_type", "UNKNOWN")
         has_catalyst = 1 if cat_type not in ("TECHNICAL", "UNKNOWN") else 0
 
         return {

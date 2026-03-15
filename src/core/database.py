@@ -254,7 +254,7 @@ class Database:
         logger.info(f"Base de données initialisée: {self.db_path}")
 
     def _migrate_news_columns(self, conn: sqlite3.Connection):
-        """Ajoute les colonnes sentiment et source_api a la table news si absentes."""
+        """Ajoute les colonnes sentiment, source_api et LLM classification a la table news."""
         existing = [row[1] for row in conn.execute("PRAGMA table_info(news)").fetchall()]
         if "sentiment" not in existing:
             conn.execute("ALTER TABLE news ADD COLUMN sentiment REAL")
@@ -262,6 +262,15 @@ class Database:
         if "source_api" not in existing:
             conn.execute("ALTER TABLE news ADD COLUMN source_api TEXT DEFAULT 'gnews'")
             logger.info("Migration: colonne 'source_api' ajoutee a la table news")
+        if "llm_catalyst_type" not in existing:
+            conn.execute("ALTER TABLE news ADD COLUMN llm_catalyst_type TEXT")
+            logger.info("Migration: colonne 'llm_catalyst_type' ajoutee a la table news")
+        if "llm_catalyst_confidence" not in existing:
+            conn.execute("ALTER TABLE news ADD COLUMN llm_catalyst_confidence REAL")
+            logger.info("Migration: colonne 'llm_catalyst_confidence' ajoutee")
+        if "llm_relevance_score" not in existing:
+            conn.execute("ALTER TABLE news ADD COLUMN llm_relevance_score REAL")
+            logger.info("Migration: colonne 'llm_relevance_score' ajoutee")
         conn.commit()
 
     def _migrate_signals_columns(self, conn: sqlite3.Connection):
@@ -611,6 +620,18 @@ class Database:
         conn.execute(
             "UPDATE news SET sentiment = ? WHERE id = ?",
             (sentiment, news_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def update_news_llm_classification(self, news_id: int, catalyst_type: str,
+                                        confidence: float, relevance: float):
+        """Met a jour la classification LLM d'une news."""
+        conn = self._connect()
+        conn.execute(
+            "UPDATE news SET llm_catalyst_type = ?, llm_catalyst_confidence = ?, "
+            "llm_relevance_score = ? WHERE id = ?",
+            (catalyst_type, confidence, relevance, news_id),
         )
         conn.commit()
         conn.close()
