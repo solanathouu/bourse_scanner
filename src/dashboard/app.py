@@ -106,8 +106,9 @@ async def dashboard_home(request: Request):
 
 
 @app.get("/news", response_class=HTMLResponse)
-async def news_feed(request: Request, ticker: str = Query(default=None)):
-    """Liste des 200 dernieres news, filtre optionnel par ticker."""
+async def news_feed(request: Request, ticker: str = Query(default=None),
+                    relevance: str = Query(default="all")):
+    """Liste des 200 dernieres news, filtres optionnels."""
     conn = _get_conn()
     try:
         tickers_rows = conn.execute(
@@ -117,15 +118,24 @@ async def news_feed(request: Request, ticker: str = Query(default=None)):
 
         cols = ("id, ticker, title, source, published_at, sentiment, "
                 "llm_catalyst_type, llm_catalyst_confidence, llm_relevance_score")
+        conditions = []
+        params = []
         if ticker:
-            news_rows = conn.execute(
-                f"SELECT {cols} FROM news WHERE ticker = ? "
-                "ORDER BY published_at DESC LIMIT 200", (ticker,)
-            ).fetchall()
-        else:
-            news_rows = conn.execute(
-                f"SELECT {cols} FROM news ORDER BY published_at DESC LIMIT 200"
-            ).fetchall()
+            conditions.append("ticker = ?")
+            params.append(ticker)
+        if relevance == "relevant":
+            conditions.append("llm_relevance_score >= 0.3")
+        elif relevance == "classified":
+            conditions.append("llm_catalyst_type IS NOT NULL")
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        news_rows = conn.execute(
+            f"SELECT {cols} FROM news {where} "
+            "ORDER BY published_at DESC LIMIT 200", params
+        ).fetchall()
         news_list = _rows_to_dicts(news_rows)
     finally:
         conn.close()
@@ -134,6 +144,7 @@ async def news_feed(request: Request, ticker: str = Query(default=None)):
         "request": request,
         "tickers": tickers_list,
         "selected_ticker": ticker,
+        "selected_relevance": relevance,
         "news_list": news_list,
     })
 

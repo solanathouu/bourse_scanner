@@ -5,12 +5,17 @@
 {% block content %}
 <h1>Actualites</h1>
 
-<form method="get" action="/news" style="margin-bottom: 16px;">
+<form method="get" action="/news" style="margin-bottom: 16px; display:flex; gap:12px; align-items:center;">
     <select name="ticker" onchange="this.form.submit()">
         <option value="">Tous les tickers</option>
         {% for t in tickers %}
         <option value="{{ t }}" {% if t == selected_ticker %}selected{% endif %}>{{ t }}</option>
         {% endfor %}
+    </select>
+    <select name="relevance" onchange="this.form.submit()">
+        <option value="all" {% if selected_relevance == 'all' %}selected{% endif %}>Toutes les news</option>
+        <option value="relevant" {% if selected_relevance == 'relevant' %}selected{% endif %}>Pertinentes uniquement (>30%)</option>
+        <option value="classified" {% if selected_relevance == 'classified' %}selected{% endif %}>Classifiees LLM</option>
     </select>
 </form>
 
