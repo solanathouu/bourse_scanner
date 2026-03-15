@@ -356,6 +356,28 @@ def score_and_alert(predictor: Predictor, signal_filter: SignalFilter,
     logger.info(f"Alertes: {len(filtered)} signaux envoyes")
 
 
+def _get_active_model_path(db: Database, scoring_config: dict) -> str:
+    """Retourne le chemin du modele actif (BDD) ou le defaut (config)."""
+    default_path = scoring_config.get("model_path", "data/models/nicolas_v1.joblib")
+    active_model = db.get_active_model_version()
+
+    if active_model is None:
+        db.insert_model_version({
+            "version": "v1",
+            "file_path": default_path,
+            "trained_at": "2026-02-20 00:00:00",
+            "training_signals": 0,
+            "accuracy": 0.0, "precision_score": 0.0,
+            "recall": 0.0, "f1": 0.0,
+            "is_active": 1,
+            "notes": "Initial model from historical trades",
+        })
+        return default_path
+
+    logger.info(f"Modele actif: {active_model['version']} ({active_model['file_path']})")
+    return active_model["file_path"]
+
+
 def run_once(dry_run: bool = False):
     """Execute un seul cycle de scoring."""
     config = load_config()
@@ -365,23 +387,8 @@ def run_once(dry_run: bool = False):
     db = Database(DB_PATH)
     db.init_db()
 
-    # Predictor
-    model_path = scoring_config.get("model_path", "data/models/nicolas_v1.joblib")
-
-    # Register current model if not in DB
-    if db.get_active_model_version() is None:
-        db.insert_model_version({
-            "version": "v1",
-            "file_path": model_path,
-            "trained_at": "2026-02-20 00:00:00",
-            "training_signals": 0,
-            "accuracy": 0.0,
-            "precision_score": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
-            "is_active": 1,
-            "notes": "Initial model from historical trades",
-        })
+    # Predictor — charger le modele actif de la BDD
+    model_path = _get_active_model_path(db, scoring_config)
 
     try:
         predictor = Predictor(db, model_path=model_path)
@@ -437,23 +444,8 @@ def run_scheduler(dry_run: bool = False):
     db = Database(DB_PATH)
     db.init_db()
 
-    # Predictor
-    model_path = scoring_config.get("model_path", "data/models/nicolas_v1.joblib")
-
-    # Register current model if not in DB
-    if db.get_active_model_version() is None:
-        db.insert_model_version({
-            "version": "v1",
-            "file_path": model_path,
-            "trained_at": "2026-02-20 00:00:00",
-            "training_signals": 0,
-            "accuracy": 0.0,
-            "precision_score": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
-            "is_active": 1,
-            "notes": "Initial model from historical trades",
-        })
+    # Predictor — charger le modele actif de la BDD
+    model_path = _get_active_model_path(db, scoring_config)
 
     try:
         predictor = Predictor(db, model_path=model_path)
