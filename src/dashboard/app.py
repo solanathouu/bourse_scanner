@@ -221,31 +221,28 @@ async def portfolio(request: Request, filter: str = Query(default="all")):
     finally:
         conn.close()
 
-    # Cumulative performance
-    cumulative = 0.0
+    # Simulation portefeuille: 1000 EUR par trade
+    TRADE_AMOUNT = 1000.0
+    capital = 0.0  # P&L cumule
     for t in trades:
-        cumulative += t.get("performance_pct", 0.0) or 0.0
-        t["cumulative_pct"] = round(cumulative, 2)
-
-    # Weekly aggregation for chart
-    weekly_data: dict[str, dict] = {}
-    for t in trades:
-        week = _iso_week(t["signal_date"])
-        if week not in weekly_data:
-            weekly_data[week] = {"week": week, "return_pct": 0.0, "count": 0}
-        weekly_data[week]["return_pct"] += t.get("performance_pct", 0.0) or 0.0
-        weekly_data[week]["count"] += 1
-    weekly_chart = sorted(weekly_data.values(), key=lambda w: w["week"])
-    for w in weekly_chart:
-        w["return_pct"] = round(w["return_pct"], 2)
+        perf = t.get("performance_pct", 0.0) or 0.0
+        pnl = TRADE_AMOUNT * perf / 100.0
+        capital += pnl
+        t["pnl_eur"] = round(pnl, 2)
+        t["capital_cumul"] = round(capital, 2)
 
     total_trades = len(trades)
     total_wins = sum(1 for t in trades if t["outcome"] == "WIN")
+    avg_perf = sum(t.get("performance_pct", 0) or 0 for t in trades) / total_trades if total_trades > 0 else 0
+    win_rate = total_wins / total_trades * 100 if total_trades > 0 else 0
 
     return templates.TemplateResponse("portfolio.html", {
-        "request": request, "trades": trades, "weekly_chart": weekly_chart,
+        "request": request, "trades": trades,
         "total_trades": total_trades, "total_wins": total_wins,
-        "total_return_pct": round(cumulative, 2),
+        "win_rate": round(win_rate, 1),
+        "avg_perf": round(avg_perf, 2),
+        "capital_cumul": round(capital, 2),
+        "trade_amount": int(TRADE_AMOUNT),
         "selected_filter": filter, "catalyst_types": catalyst_types,
     })
 

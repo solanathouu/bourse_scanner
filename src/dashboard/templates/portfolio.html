@@ -4,11 +4,12 @@
 
 {% block content %}
 <h1>Portfolio virtuel</h1>
+<p style="color:#888; margin-bottom:16px">Simulation : {{ trade_amount }} EUR par trade, achat au signal, vente a J+3. Purement indicatif.</p>
 
 <form method="get" action="/portfolio" style="margin-bottom: 16px;">
     <select name="filter" onchange="this.form.submit()">
         <option value="all" {% if selected_filter == 'all' %}selected{% endif %}>Tous les signaux</option>
-        <option value="confirmed" {% if selected_filter == 'confirmed' %}selected{% endif %}>CONFIRME uniquement</option>
+        <option value="confirmed" {% if selected_filter == 'confirmed' %}selected{% endif %}>WIN uniquement</option>
         {% for cat in catalyst_types %}
         <option value="{{ cat }}" {% if selected_filter == cat %}selected{% endif %}>{{ cat }}</option>
         {% endfor %}
@@ -17,23 +18,33 @@
 
 <div class="kpi-grid">
     <div class="kpi-card">
-        <div class="kpi-label">Nombre de trades</div>
+        <div class="kpi-label">Trades</div>
         <div class="kpi-value">{{ total_trades }}</div>
     </div>
     <div class="kpi-card">
         <div class="kpi-label">Wins</div>
-        <div class="kpi-value" style="color: #00b894">{{ total_wins }}</div>
+        <div class="kpi-value" style="color:#00b894">{{ total_wins }}</div>
     </div>
     <div class="kpi-card">
-        <div class="kpi-label">Performance totale</div>
-        <div class="kpi-value" style="color: {% if total_return_pct >= 0 %}#00b894{% else %}#e74c3c{% endif %}">
-            {{ "%+.1f"|format(total_return_pct) }}%
+        <div class="kpi-label">Win Rate</div>
+        <div class="kpi-value">{{ win_rate }}%</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">Perf. moyenne / trade</div>
+        <div class="kpi-value" style="color:{% if avg_perf >= 0 %}#00b894{% else %}#e74c3c{% endif %}">
+            {{ "%+.2f"|format(avg_perf) }}%
+        </div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">P&amp;L cumule ({{ trade_amount }} EUR/trade)</div>
+        <div class="kpi-value" style="color:{% if capital_cumul >= 0 %}#00b894{% else %}#e74c3c{% endif %}">
+            {{ "%+.0f"|format(capital_cumul) }} EUR
         </div>
     </div>
 </div>
 
 <div class="chart-container">
-    <h2>Performance cumulee</h2>
+    <h2>P&amp;L cumule</h2>
     <canvas id="perfChart"></canvas>
 </div>
 
@@ -46,8 +57,9 @@
                 <th>Ticker</th>
                 <th>Catalyseur</th>
                 <th>Prix entree</th>
-                <th>Prix sortie</th>
-                <th>Performance</th>
+                <th>Prix J+3</th>
+                <th>Perf %</th>
+                <th>P&amp;L EUR</th>
                 <th>Resultat</th>
             </tr>
         </thead>
@@ -56,11 +68,14 @@
             <tr>
                 <td>{{ t.signal_date }}</td>
                 <td><span class="badge badge-ticker">{{ t.ticker }}</span></td>
-                <td>{{ t.catalyst_type or '-' }}</td>
-                <td>{{ "%.2f"|format(t.signal_price) }} EUR</td>
-                <td>{{ "%.2f"|format(t.review_price) }} EUR</td>
-                <td style="color: {% if t.performance_pct >= 0 %}#00b894{% else %}#e74c3c{% endif %}">
+                <td>{% if t.catalyst_type %}<span class="badge badge-catalyst">{{ t.catalyst_type }}</span>{% else %}-{% endif %}</td>
+                <td>{{ "%.2f"|format(t.signal_price) }}</td>
+                <td>{{ "%.2f"|format(t.review_price) }}</td>
+                <td style="color:{% if t.performance_pct >= 0 %}#00b894{% else %}#e74c3c{% endif %}">
                     {{ "%+.2f"|format(t.performance_pct) }}%
+                </td>
+                <td style="color:{% if t.pnl_eur >= 0 %}#00b894{% else %}#e74c3c{% endif %}">
+                    {{ "%+.0f"|format(t.pnl_eur) }} EUR
                 </td>
                 <td>
                     {% if t.outcome == 'WIN' %}<span class="badge badge-win">WIN</span>
@@ -83,20 +98,20 @@
         data: {
             labels: trades.map(t => t.signal_date),
             datasets: [{
-                label: 'Performance cumulee (%)',
-                data: trades.map(t => t.cumulative_pct),
-                borderColor: '#4fc3f7',
-                backgroundColor: 'rgba(79, 195, 247, 0.1)',
+                label: 'P&L cumule (EUR)',
+                data: trades.map(t => t.capital_cumul),
+                borderColor: trades[trades.length-1]?.capital_cumul >= 0 ? '#00b894' : '#e74c3c',
+                backgroundColor: 'rgba(79, 195, 247, 0.05)',
                 fill: true,
                 tension: 0.3,
-                pointRadius: 3
+                pointRadius: 2
             }]
         },
         options: {
             responsive: true,
             scales: {
                 y: { ticks: { color: '#a0a0a0' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                x: { ticks: { color: '#a0a0a0', maxRotation: 45 }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                x: { ticks: { color: '#a0a0a0', maxRotation: 45, maxTicksLimit: 15 }, grid: { color: 'rgba(255,255,255,0.05)' } }
             },
             plugins: { legend: { labels: { color: '#e0e0e0' } } }
         }
