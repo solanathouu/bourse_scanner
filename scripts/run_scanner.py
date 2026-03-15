@@ -690,20 +690,6 @@ def run_scheduler(dry_run: bool = False):
     print(f"  - Carnet d'ordres: toutes les {sched_config.get('orderbook_interval_min', 15)} min")
     print(f"\nCtrl+C pour arreter\n")
 
-    # Lancer le bot interactif dans un thread separe
-    if interactive:
-        import threading
-        def run_interactive():
-            try:
-                app = interactive.create_application()
-                app.run_polling(drop_pending_updates=True)
-            except Exception as e:
-                logger.error(f"Bot interactif crash: {e}")
-
-        bot_thread = threading.Thread(target=run_interactive, daemon=True)
-        bot_thread.start()
-        logger.info("Bot interactif Telegram demarre en arriere-plan")
-
     scheduler.start()
 
 
